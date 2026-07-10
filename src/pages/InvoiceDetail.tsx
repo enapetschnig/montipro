@@ -1647,9 +1647,9 @@ export default function InvoiceDetail() {
    * nicht; ohne diesen Helper landet im PDF "0,00 €" als Summe.
    */
   const buildInvoiceForPdf = async (): Promise<any> => {
-    const { loadDocumentTexts, applyDocumentTextsToInvoice } = await import("@/lib/documentTextsLoader");
-    const docTexts = await loadDocumentTexts(form.typ);
-    const tageMatch = (form.zahlungsbedingungen || "").match(/\d+/);
+    const { loadDocumentTexts, applyDocumentTextsToInvoice, computeZahlungsTage, stripTageClosingIfSofort } = await import("@/lib/documentTextsLoader");
+    const zahlungsTage = computeZahlungsTage(form.datum, form.faellig_am, form.zahlungsbedingungen);
+    const docTexts = stripTageClosingIfSofort(await loadDocumentTexts(form.typ), zahlungsTage);
     // Kundentyp für PDF-Renderer mitliefern — Geschäftskunden zeigen
     // keine "Anrede" über dem Firmennamen (verhindert "Firma\nFirma X"-
     // Doppelung in der Anschrift). Fallback: leerer String.
@@ -1671,7 +1671,7 @@ export default function InvoiceDetail() {
       brutto_summe: bruttoSumme,
     };
     const extraVars: Record<string, string | number | null | undefined> = {
-      tage: tageMatch ? Number(tageMatch[0]) : 14,
+      tage: zahlungsTage,
     };
     // Quell-Dokument für AB / Anzahlungs-/Schluss-Rechnung laden — die
     // Platzhalter {{angebot_nr}} / {{angebot_datum}} (in der AB-Vorlage)
@@ -3345,8 +3345,12 @@ export default function InvoiceDetail() {
                 </p>
               </div>
 
-              {/* Zahlungseinstellungen (vom Kunden) */}
-              {["rechnung", "anzahlungsrechnung", "schlussrechnung"].includes(form.typ) && (form.skonto_prozent > 0 || form.skonto_tage > 0 || (form as any).zahlungsbedingungen) && (
+              {/* Skonto-Einstellungen vom Kunden. Die Zahlungsfrist wird hier
+                  NICHT mehr angezeigt — sie ist direkt darunter als editierbares
+                  Dropdown sichtbar (Doppelanzeige mit Roh-Wert "sofort" war
+                  irreführend, weil der Wert auch aus dem Convert-Default
+                  stammen kann, nicht nur vom Kunden). */}
+              {["rechnung", "anzahlungsrechnung", "schlussrechnung"].includes(form.typ) && (form.skonto_prozent > 0 || form.skonto_tage > 0) && (
                 <div className="mt-3 p-3 rounded-lg bg-muted/30 border">
                   <p className="text-xs font-medium text-muted-foreground mb-2">Zahlungseinstellungen vom Kunden</p>
                   <div className="grid grid-cols-3 gap-3 text-sm">
@@ -3355,9 +3359,6 @@ export default function InvoiceDetail() {
                     )}
                     {form.skonto_tage > 0 && (
                       <div><span className="text-muted-foreground">Skonto-Tage:</span> <strong>{form.skonto_tage}</strong></div>
-                    )}
-                    {form.zahlungsbedingungen && (
-                      <div><span className="text-muted-foreground">Zahlungsfrist:</span> <strong>{form.zahlungsbedingungen}</strong></div>
                     )}
                   </div>
                 </div>

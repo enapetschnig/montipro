@@ -46,6 +46,44 @@ function formatDateAT(d: unknown): string {
   }
 }
 
+/**
+ * {{tage}}-Wert für Textbausteine ("… innerhalb {{tage}} Tagen fällig").
+ * Primär aus der echten Fälligkeit (faellig_am − datum) — der Dropdown-
+ * String taugt nicht als Quelle, weil "sofort" und "individuell" keine
+ * Zahl enthalten (früher fiel das auf 14 zurück und das PDF widersprach
+ * dem gewählten Zahlungsziel).
+ */
+export function computeZahlungsTage(
+  datum: string | null | undefined,
+  faelligAm: string | null | undefined,
+  zahlungsbedingungen: string | null | undefined,
+): number {
+  if (datum && faelligAm) {
+    const diff = Math.round(
+      (new Date(faelligAm + "T12:00:00").getTime() - new Date(datum + "T12:00:00").getTime()) / 86400000,
+    );
+    if (isFinite(diff) && diff >= 0) return diff;
+  }
+  const zb = (zahlungsbedingungen || "").trim();
+  if (/sofort|umgehend|prompt/i.test(zb)) return 0;
+  const m = zb.match(/\d+/);
+  return m ? Number(m[0]) : 14;
+}
+
+/**
+ * Bei Sofort-Fälligkeit (tage=0) einen Closing-Baustein mit {{tage}}
+ * verwerfen — "innerhalb 0 Tagen fällig" wäre falsches Deutsch. Ohne
+ * Override greift die eingebaute pdfGenerator-Logik
+ * ("Zahlbar sofort ohne Abzug.").
+ */
+export function stripTageClosingIfSofort(texts: DocumentTexts, tage: number): DocumentTexts {
+  if (tage === 0 && texts.closing && texts.closing.includes("{{tage}}")) {
+    const { closing: _drop, ...rest } = texts;
+    return rest;
+  }
+  return texts;
+}
+
 export function applyDocumentTextsToInvoice<T extends object>(
   invoice: T,
   texts: DocumentTexts,

@@ -317,14 +317,10 @@ export function AdminTimeEntryDialog({
             reason: `Zeitausgleich ${form.datum} storniert (Eintrag gelöscht)`,
           });
         }
-        // Zugehörigen Plantafel-Block (leave_request) mitentfernen — sonst
-        // zeigt die Plantafel weiter einen ZA, der nicht mehr existiert.
-        await (supabase.from("leave_requests" as never) as any)
-          .delete()
-          .eq("user_id", userId)
-          .eq("type", "za")
-          .lte("start_date", form.datum)
-          .gte("end_date", form.datum);
+        // Zugehörigen Plantafel-Block (leave_request) tageweise mitentfernen —
+        // mehrtägige Blöcke werden geschrumpft/gesplittet statt komplett gelöscht.
+        const { removeZaLeaveDay } = await import("@/lib/zaLeaveCleanup");
+        await removeZaLeaveDay(userId, form.datum);
       }
 
       toast({ title: istZA ? "Zeitausgleich entfernt" : "Eintrag gelöscht", description: istZA ? "Zeitkonto korrigiert." : undefined });

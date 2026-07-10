@@ -38,6 +38,7 @@ import { Loader2, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { getNormalWorkingHours, getDefaultWorkTimes } from "@/lib/workingHours";
+import { useAustrianHolidays } from "@/hooks/useAustrianHolidays";
 import { format } from "date-fns";
 
 type AbsenceType = "Urlaub" | "Krankenstand" | "Zeitausgleich" | "Feiertag" | "Weiterbildung";
@@ -66,6 +67,7 @@ export function AdminAbsenceDialog({
   onSaved,
 }: AdminAbsenceDialogProps) {
   const { toast } = useToast();
+  const { holidaySet } = useAustrianHolidays();
   const today = format(new Date(), "yyyy-MM-dd");
   const [userId, setUserId] = useState<string>(defaultUserId);
   const [type, setType] = useState<AbsenceType>("Urlaub");
@@ -88,17 +90,22 @@ export function AdminAbsenceDialog({
   }, [open, defaultUserId]);
 
   // Werktage im Bereich [fromDate, toDate], die ein Tagessoll > 0 haben
-  // (Mo-Do bei der aktuellen 10/0-Regel). Wochenende übersprungen.
+  // (Mo-Do bei der aktuellen 10/0-Regel). Wochenende UND AT-Feiertage
+  // übersprungen — sonst würde z.B. ein ZA über einen Feiertag hinweg
+  // 10h zu viel vom Stundenkonto abziehen. Ausnahme: beim Typ "Feiertag"
+  // wird der Feiertag bewusst NICHT übersprungen (der Admin will ja genau
+  // diesen Tag nachtragen).
   const eligibleDates = useMemo(() => {
     if (!fromDate || !toDate || fromDate > toDate) return [] as string[];
+    const effectiveHolidaySet = type === "Feiertag" ? undefined : holidaySet;
     const out: string[] = [];
     const start = new Date(fromDate + "T12:00:00");
     const end = new Date(toDate + "T12:00:00");
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      if (getNormalWorkingHours(d) > 0) out.push(format(d, "yyyy-MM-dd"));
+      if (getNormalWorkingHours(d, effectiveHolidaySet) > 0) out.push(format(d, "yyyy-MM-dd"));
     }
     return out;
-  }, [fromDate, toDate]);
+  }, [fromDate, toDate, type, holidaySet]);
 
   const sortedProfiles = useMemo(() => {
     return Object.entries(profiles)
@@ -157,24 +164,36 @@ export function AdminAbsenceDialog({
           nachgetragen_am: caller.id !== userId ? new Date().toISOString() : null,
         };
       });
-      const { error: teErr } = await supabase.from("time_entries").insert(rows as any);
-      if (teErr) throw teErr;
-
-      // leave_request mit status='genehmigt' anlegen — Plantafel zeigt
-      // den Block dann automatisch via isOnLeave-Helper.
+      // leave_request ZUERST anlegen (mit Fehler-Check) — schlägt er fehl,
+      // ist noch nichts geschrieben. Früher wurde der Insert nicht geprüft
+      // und scheiterte bei fremden Mitarbeitern still an RLS: time_entries
+      // + Konto-Abzug existierten, der Plantafel-Block fehlte.
       const leaveTypeKey = TYPE_OPTIONS.find(o => o.value === type)?.leaveTypeKey || "urlaub";
       const totalDays = eligibleDates.length;
-      await (supabase.from("leave_requests" as any) as any).insert({
-        user_id: userId,
-        type: leaveTypeKey,
-        start_date: fromDate,
-        end_date: toDate,
-        days: totalDays,
-        status: "genehmigt",
-        reviewed_by: caller.id,
-        reviewed_at: new Date().toISOString(),
-        notizen: notiz || null,
-      });
+      const { data: createdLeave, error: lrErr } = await (supabase.from("leave_requests" as any) as any)
+        .insert({
+          user_id: userId,
+          type: leaveTypeKey,
+          start_date: fromDate,
+          end_date: toDate,
+          days: totalDays,
+          status: "genehmigt",
+          reviewed_by: caller.id,
+          reviewed_at: new Date().toISOString(),
+          notizen: notiz || null,
+        })
+        .select("id")
+        .single();
+      if (lrErr) throw lrErr;
+
+      const { error: teErr } = await supabase.from("time_entries").insert(rows as any);
+      if (teErr) {
+        // Rollback des eben angelegten Plantafel-Blocks
+        if (createdLeave?.id) {
+          await (supabase.from("leave_requests" as any) as any).delete().eq("id", createdLeave.id);
+        }
+        throw teErr;
+      }
 
       // Bei Zeitausgleich: Stundenkonto-Abzug — analog TimeTracking.tsx
       // (sonst würde der ZA "doppelt zählen" — kein Soll und kein Abzug).

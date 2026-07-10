@@ -275,9 +275,9 @@ export default function Invoices() {
       }
 
       const { generateInvoicePdf } = await import("@/lib/pdfGenerator");
-      const { loadDocumentTexts, applyDocumentTextsToInvoice } = await import("@/lib/documentTextsLoader");
-      const docTexts = await loadDocumentTexts(inv.typ);
-      const tageMatchDL = (inv.zahlungsbedingungen || "").match(/\d+/);
+      const { loadDocumentTexts, applyDocumentTextsToInvoice, computeZahlungsTage, stripTageClosingIfSofort } = await import("@/lib/documentTextsLoader");
+      const zahlungsTageDL = computeZahlungsTage(inv.datum, inv.faellig_am, inv.zahlungsbedingungen);
+      const docTexts = stripTageClosingIfSofort(await loadDocumentTexts(inv.typ), zahlungsTageDL);
       const invoiceWithTexts = applyDocumentTextsToInvoice({
         typ: inv.typ, nummer: inv.nummer, status: inv.status,
         kunde_name: inv.kunde_name, kunde_adresse: inv.kunde_adresse,
@@ -293,7 +293,7 @@ export default function Invoices() {
         rabatt_betrag: Number(inv.rabatt_betrag), mahnstufe: Number(inv.mahnstufe),
         skonto_prozent: Number(inv.skonto_prozent || 0), skonto_tage: Number(inv.skonto_tage || 0),
         anzahlung_prozent: Number((inv as any).anzahlung_prozent || 0) || undefined,
-      }, docTexts, { tage: tageMatchDL ? Number(tageMatchDL[0]) : 14 });
+      }, docTexts, { tage: zahlungsTageDL });
       const pdfBlob = await generateInvoicePdf(
         invoiceWithTexts,
         (invItems || []).map((it: any) => ({
@@ -354,9 +354,9 @@ export default function Invoices() {
       }
 
       const { generateInvoicePdf } = await import("@/lib/pdfGenerator");
-      const { loadDocumentTexts, applyDocumentTextsToInvoice } = await import("@/lib/documentTextsLoader");
-      const docTexts = await loadDocumentTexts(inv.typ);
-      const tageMatchDL = (inv.zahlungsbedingungen || "").match(/\d+/);
+      const { loadDocumentTexts, applyDocumentTextsToInvoice, computeZahlungsTage, stripTageClosingIfSofort } = await import("@/lib/documentTextsLoader");
+      const zahlungsTageDL = computeZahlungsTage(inv.datum, inv.faellig_am, inv.zahlungsbedingungen);
+      const docTexts = stripTageClosingIfSofort(await loadDocumentTexts(inv.typ), zahlungsTageDL);
       const invoiceWithTexts = applyDocumentTextsToInvoice({
         typ: inv.typ, nummer: inv.nummer, status: inv.status,
         kunde_name: inv.kunde_name, kunde_adresse: inv.kunde_adresse,
@@ -372,7 +372,7 @@ export default function Invoices() {
         rabatt_betrag: Number(inv.rabatt_betrag), mahnstufe: Number(inv.mahnstufe),
         skonto_prozent: Number(inv.skonto_prozent || 0), skonto_tage: Number(inv.skonto_tage || 0),
         anzahlung_prozent: Number((inv as any).anzahlung_prozent || 0) || undefined,
-      }, docTexts, { tage: tageMatchDL ? Number(tageMatchDL[0]) : 14 });
+      }, docTexts, { tage: zahlungsTageDL });
       const pdfBlob = await generateInvoicePdf(
         invoiceWithTexts,
         (invItems || []).map((it: any) => ({

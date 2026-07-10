@@ -490,17 +490,19 @@ const TimeTracking = () => {
     const defaultTimes = getDefaultWorkTimes(selectedDateObj);
 
     let workingHours: number;
-    let entryStartTime: string;
-    let entryEndTime: string;
+    let entryStartTime: string | null;
+    let entryEndTime: string | null;
     let entryPauseMinutes: number;
 
     if (absenceData.isFullDay) {
       const custom = absenceData.customHours ? parseFloat(absenceData.customHours) : NaN;
       // Validierung: muss eine endliche, nicht-negative Zahl zwischen 0 und 24 sein
       workingHours = (isFinite(custom) && custom >= 0 && custom <= 24) ? custom : automaticHours;
-      entryStartTime = defaultTimes?.startTime || "07:00";
-      entryEndTime = defaultTimes?.endTime || "16:00";
-      entryPauseMinutes = defaultTimes?.pauseMinutes || 30;
+      // An arbeitsfreien Tagen (defaultTimes=null) KEINE erfundenen Uhrzeiten
+      // schreiben — die Anzeige würde sonst 07:00–16:00 behaupten.
+      entryStartTime = defaultTimes?.startTime ?? null;
+      entryEndTime = defaultTimes?.endTime ?? null;
+      entryPauseMinutes = defaultTimes?.pauseMinutes ?? 0;
     } else {
       // Calculate from Von/Bis
       const [sH, sM] = absenceData.absenceStartTime.split(':').map(Number);
@@ -525,7 +527,7 @@ const TimeTracking = () => {
     // Zeitausgleich". Ein fehlendes Zeitkonto ist ebenfalls kein Fehler
     // mehr (zählt als 0 und wird beim Abbuchen automatisch angelegt).
     if (absenceData.type === "za") {
-      const [{ data: timeAccount }, { data: allEntries }] = await Promise.all([
+      const [{ data: timeAccount, error: taErr }, { data: allEntries, error: teErr }] = await Promise.all([
         supabase
           .from("time_accounts")
           .select("id, balance_hours")
@@ -536,6 +538,15 @@ const TimeTracking = () => {
           .select("datum, stunden, taetigkeit")
           .eq("user_id", user.id),
       ]);
+
+      // Fetch-Fehler NICHT als "0 Stunden verfügbar" fehlinterpretieren —
+      // sonst erscheint bei einem Netzwerk-Schluckauf fälschlich
+      // "Nicht genügend Plusstunden".
+      if (taErr || teErr) {
+        toast({ variant: "destructive", title: "Fehler", description: "Zeitkonto konnte nicht geladen werden — bitte erneut versuchen." });
+        setSubmittingAbsence(false);
+        return;
+      }
 
       const balanceBefore = Number(timeAccount?.balance_hours) || 0;
       const autoSaldo = totalAutoSaldo((allEntries as any[]) || [], holidaySet);
@@ -562,7 +573,7 @@ const TimeTracking = () => {
             .insert({ user_id: user.id, balance_hours: balanceAfter });
 
       if (updateErr) {
-        toast({ variant: "destructive", title: "Fehler", description: "ZA-Stunden konnten nicht abgebucht werden" });
+        toast({ variant: "destructive", title: "Fehler", description: `ZA-Stunden konnten nicht abgebucht werden: ${updateErr.message}` });
         setSubmittingAbsence(false);
         return;
       }
