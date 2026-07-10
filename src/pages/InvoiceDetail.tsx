@@ -430,7 +430,10 @@ export default function InvoiceDetail() {
         ausfuehrungs_kw: data.ausfuehrungs_kw || "",
         ausfuehrende_firma: data.ausfuehrende_firma || "",
         ausfuehrende_firma_freitext: data.ausfuehrende_firma_freitext || "",
-        zahlungsbedingungen: data.zahlungsbedingungen || "",
+        // Quelle (z.B. Angebot) hat oft keine Zahlungsfrist — dann Firmen-
+        // Standard "sofort" statt leer, damit Anzahlungs-/Schlussrechnungen
+        // nicht ohne wählbares Zahlungsziel dastehen.
+        zahlungsbedingungen: data.zahlungsbedingungen || "sofort",
         notizen: data.notizen || "",
         betreff: data.betreff || "",
         mwst_satz: Number(data.mwst_satz) || 20,
@@ -3343,7 +3346,7 @@ export default function InvoiceDetail() {
               </div>
 
               {/* Zahlungseinstellungen (vom Kunden) */}
-              {form.typ === "rechnung" && (form.skonto_prozent > 0 || form.skonto_tage > 0 || (form as any).zahlungsbedingungen) && (
+              {["rechnung", "anzahlungsrechnung", "schlussrechnung"].includes(form.typ) && (form.skonto_prozent > 0 || form.skonto_tage > 0 || (form as any).zahlungsbedingungen) && (
                 <div className="mt-3 p-3 rounded-lg bg-muted/30 border">
                   <p className="text-xs font-medium text-muted-foreground mb-2">Zahlungseinstellungen vom Kunden</p>
                   <div className="grid grid-cols-3 gap-3 text-sm">
@@ -3398,7 +3401,7 @@ export default function InvoiceDetail() {
                     </p>
                   </div>
                 )}
-                {form.typ === "rechnung" && (
+                {["rechnung", "anzahlungsrechnung", "schlussrechnung"].includes(form.typ) && (
                   <div>
                     <Label>Fällig am</Label>
                     <Input
@@ -3422,11 +3425,13 @@ export default function InvoiceDetail() {
                 )}
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {form.typ === "rechnung" && (
+                {/* Zahlungsfrist bei allen echten Rechnungs-Typen wählbar —
+                    auch Anzahlungs- und Schlussrechnung (User-Feedback 10.07.2026). */}
+                {["rechnung", "anzahlungsrechnung", "schlussrechnung"].includes(form.typ) && (
                   <div>
                     <Label>Zahlungsfrist</Label>
                     <Select
-                      value={form.zahlungsbedingungen || "14 Tage"}
+                      value={form.zahlungsbedingungen || "sofort"}
                       onValueChange={(v) => {
                         // Dropdown ist Single Source of Truth. "individuell"
                         // schaltet das faellig_am-Feld frei; alle anderen Werte

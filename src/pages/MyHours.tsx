@@ -220,6 +220,13 @@ const MyHours = () => {
             hours, balance_before: before, balance_after: after,
             reason: `Zeitausgleich ${editingEntry.datum} storniert (Eintrag gelöscht)`,
           });
+          // Zugehörigen Plantafel-Block (leave_request) mitentfernen.
+          await (supabase.from("leave_requests" as never) as any)
+            .delete()
+            .eq("user_id", user.id)
+            .eq("type", "za")
+            .lte("start_date", editingEntry.datum)
+            .gte("end_date", editingEntry.datum);
           zaStorniert = true;
         }
       }

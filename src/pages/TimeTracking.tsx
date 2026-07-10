@@ -16,13 +16,15 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { toast as sonnerToast } from "sonner";
-import { 
-  getNormalWorkingHours, 
-  getDefaultWorkTimes, 
+import {
+  getNormalWorkingHours,
+  getDefaultWorkTimes,
   isNonWorkingDay,
   getWeeklyTargetHours,
   getTotalWorkingHours
 } from "@/lib/workingHours";
+import { totalAutoSaldo } from "@/lib/hoursAccounting";
+import { useAustrianHolidays } from "@/hooks/useAustrianHolidays";
 
 type Project = {
   id: string;
@@ -107,6 +109,8 @@ const createEmptyKfzEntry = (): KfzEntry => ({
 
 const TimeTracking = () => {
   const { toast } = useToast();
+  // AT-Feiertage für die Saldo-Berechnung beim ZA-Check (effektiver Saldo).
+  const { holidaySet } = useAustrianHolidays();
   const [projects, setProjects] = useState<Project[]>([]);
   const [vehicles, setVehicles] = useState<{ id: string; bezeichnung: string; kennzeichen: string | null }[]>([]);
   const [taetigkeitOptions, setTaetigkeitOptions] = useState<string[]>([]);
@@ -511,33 +515,51 @@ const TimeTracking = () => {
       entryPauseMinutes = pause;
     }
 
-    // ZA: Check and deduct from time account
+    // ZA: Verfügbarkeit prüfen + vom Zeitkonto abbuchen.
+    //
+    // Die verfügbaren Plusstunden sind der EFFEKTIVE Saldo = Auto-Saldo
+    // (aus allen time_entries berechnet, dort sammeln sich die Überstunden)
+    // + Manuell (time_accounts.balance_hours). Früher wurde nur
+    // balance_hours geprüft — das war fast immer 0/negativ, obwohl der
+    // Mitarbeiter reichlich Plusstunden hatte → fälschlich "Nicht genügend
+    // Zeitausgleich". Ein fehlendes Zeitkonto ist ebenfalls kein Fehler
+    // mehr (zählt als 0 und wird beim Abbuchen automatisch angelegt).
     if (absenceData.type === "za") {
-      const { data: timeAccount, error: taError } = await supabase
-        .from("time_accounts")
-        .select("id, balance_hours")
-        .eq("user_id", user.id)
-        .maybeSingle();
+      const [{ data: timeAccount }, { data: allEntries }] = await Promise.all([
+        supabase
+          .from("time_accounts")
+          .select("id, balance_hours")
+          .eq("user_id", user.id)
+          .maybeSingle(),
+        supabase
+          .from("time_entries")
+          .select("datum, stunden, taetigkeit")
+          .eq("user_id", user.id),
+      ]);
 
-      if (taError || !timeAccount) {
-        toast({ variant: "destructive", title: "Fehler", description: "Kein Zeitkonto gefunden. Bitte wenden Sie sich an den Administrator." });
+      const balanceBefore = Number(timeAccount?.balance_hours) || 0;
+      const autoSaldo = totalAutoSaldo((allEntries as any[]) || [], holidaySet);
+      const effektiv = autoSaldo + balanceBefore;
+
+      if (effektiv < workingHours) {
+        toast({
+          variant: "destructive",
+          title: "Nicht genügend Plusstunden",
+          description: `Verfügbar: ${effektiv.toFixed(2)}h (effektiver Saldo), benötigt: ${workingHours}h`,
+        });
         setSubmittingAbsence(false);
         return;
       }
 
-      if (Number(timeAccount.balance_hours) < workingHours) {
-        toast({ variant: "destructive", title: "Nicht genügend ZA-Stunden", description: `Verfügbar: ${timeAccount.balance_hours}h, benötigt: ${workingHours}h` });
-        setSubmittingAbsence(false);
-        return;
-      }
-
-      const balanceBefore = Number(timeAccount.balance_hours);
       const balanceAfter = balanceBefore - workingHours;
 
-      const { error: updateErr } = await supabase
-        .from("time_accounts")
-        .update({ balance_hours: balanceAfter, updated_at: new Date().toISOString() })
-        .eq("id", timeAccount.id);
+      const { error: updateErr } = timeAccount
+        ? await supabase
+            .from("time_accounts")
+            .update({ balance_hours: balanceAfter, updated_at: new Date().toISOString() })
+            .eq("id", timeAccount.id)
+        : await (supabase.from("time_accounts" as never) as any)
+            .insert({ user_id: user.id, balance_hours: balanceAfter });
 
       if (updateErr) {
         toast({ variant: "destructive", title: "Fehler", description: "ZA-Stunden konnten nicht abgebucht werden" });
@@ -886,7 +908,7 @@ const TimeTracking = () => {
                     {getWeeklyTargetHours()}h Wochensoll
                   </Badge>
                   <span className="text-xs text-muted-foreground">
-                    Mo-Do: 8,5h • Fr: 5h (inkl. 0,5h Überstunde/ZA)
+                    Mo–Do: 10h (07:00–17:30, 30 Min Pause) • Fr: arbeitsfrei
                   </span>
                 </div>
               </div>
@@ -1544,11 +1566,15 @@ const TimeTracking = () => {
                   </div>
                   <div className="text-xs text-muted-foreground">
                     {(() => {
+                      // Aus getDefaultWorkTimes ableiten statt hart kodieren —
+                      // so bleibt der Text bei Regeländerungen automatisch korrekt.
                       const absenceDateObj = new Date(absenceData.date);
-                      const dayOfWeek = absenceDateObj.getDay();
-                      if (dayOfWeek === 0 || dayOfWeek === 6) return "Wochenende: 0 Stunden";
-                      if (dayOfWeek === 5) return "Freitag: 4,5 Stunden (07:00 - 12:00)";
-                      return "Mo-Do: 8,5 Stunden (07:00 - 16:00, 30min Pause)";
+                      const preset = getDefaultWorkTimes(absenceDateObj);
+                      if (!preset) {
+                        const dayOfWeek = absenceDateObj.getDay();
+                        return dayOfWeek === 5 ? "Freitag: arbeitsfrei (0 Stunden)" : "Wochenende: 0 Stunden";
+                      }
+                      return `Mo–Do: ${preset.totalHours} Stunden (${preset.startTime} – ${preset.endTime}, ${preset.pauseMinutes} Min Pause)`;
                     })()}
                   </div>
                   <div className="pt-2 border-t">

@@ -37,7 +37,7 @@ import {
 import { Loader2, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { getNormalWorkingHours } from "@/lib/workingHours";
+import { getNormalWorkingHours, getDefaultWorkTimes } from "@/lib/workingHours";
 import { format } from "date-fns";
 
 type AbsenceType = "Urlaub" | "Krankenstand" | "Zeitausgleich" | "Feiertag" | "Weiterbildung";
@@ -137,15 +137,19 @@ export function AdminAbsenceDialog({
       const rows = eligibleDates.map((d) => {
         const dateObj = new Date(d + "T12:00:00");
         const stunden = getNormalWorkingHours(dateObj);
+        // Zeiten aus der Regelarbeitszeit (Mo-Do 07:00-17:30, 30 Min Pause)
+        // — sonst zeigt die Stundenauswertung 07:00-16:00 an, was nicht zu
+        // den 10 berechneten Stunden passt (User-Feedback 10.07.2026).
+        const preset = getDefaultWorkTimes(dateObj);
         return {
           user_id: userId,
           datum: d,
           project_id: null,
           taetigkeit: type,
           stunden,
-          start_time: "07:00",
-          end_time: "16:00",
-          pause_minutes: 30,
+          start_time: preset?.startTime || "07:00",
+          end_time: preset?.endTime || "17:30",
+          pause_minutes: preset?.pauseMinutes ?? 30,
           location_type: "baustelle",
           notizen: notiz || null,
           week_type: null,
