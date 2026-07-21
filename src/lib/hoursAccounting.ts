@@ -85,7 +85,13 @@ export function aggregateByDay(entries: TimeEntryLite[], holidaySet?: Set<string
     let soll: number;
     let saldo: number;
     if (istSonderzeit || isHoliday) {
-      soll = 0;
+      // Das Tagessoll bleibt bestehen (der Tag WAR ein Arbeitstag) — es gilt
+      // durch die Abwesenheit bzw. den Feiertag als erfüllt, daher Saldo 0.
+      // Bewusst OHNE holidaySet gerechnet: auch ein Feiertag zählt mit seinen
+      // 10 h ins Monats-Soll und wird durch die Feiertags-Buchung neutralisiert.
+      // Früher wurde soll=0 gesetzt — dadurch schrumpfte das Monats-Soll um
+      // jeden Abwesenheitstag (Juni 2026: 160 statt 180 h, Feedback 21.07.2026).
+      soll = getNormalWorkingHours(new Date(datum + "T12:00:00"));
       saldo = 0;
     } else {
       soll = getNormalWorkingHours(new Date(datum + "T12:00:00"), holidaySet);
@@ -98,6 +104,72 @@ export function aggregateByDay(entries: TimeEntryLite[], holidaySet?: Set<string
     });
   }
   return out.sort((a, b) => a.datum.localeCompare(b.datum));
+}
+
+export type MonthBalance = {
+  /** Summe aller gebuchten Stunden im Monat (inkl. Abwesenheiten). */
+  ist: number;
+  /** Monats-Soll aus dem KALENDER (alle Mo-Do ohne Feiertage), nicht aus den Einträgen. */
+  soll: number;
+  /** ist − soll, wobei Abwesenheitstage neutral sind und fehlende Werktage als Minus zählen. */
+  saldo: number;
+  /** Werktage im Zeitraum ohne jeden Eintrag (fehlende Zeiterfassung). */
+  fehlendeWerktage: string[];
+  /** true = laufender Monat, Soll nur bis heute gerechnet. */
+  bisHeute: boolean;
+};
+
+/**
+ * Monats-Auswertung mit KALENDER-basiertem Soll.
+ *
+ * Wichtig: Das Soll wird über alle Werktage des Monats gerechnet — nicht nur
+ * über Tage, an denen Einträge existieren. Vorher schrumpfte das Soll um
+ * jeden Abwesenheits- und jeden nicht erfassten Tag (Juni 2026: 160 statt
+ * 180 h). Ein Werktag ganz ohne Eintrag erzeugt jetzt sichtbar ein Minus.
+ *
+ * Im LAUFENDEN Monat wird nur bis heute gerechnet, sonst würden die noch
+ * nicht gearbeiteten Resttage als riesiges Minus erscheinen.
+ */
+export function aggregateMonth(
+  entries: TimeEntryLite[],
+  year: number,
+  month: number,          // 1-12
+  holidaySet?: Set<string>,
+  today: Date = new Date(),
+): MonthBalance {
+  const lastDay = new Date(year, month, 0).getDate();
+  const isCurrentMonth = today.getFullYear() === year && today.getMonth() + 1 === month;
+  const endDay = isCurrentMonth ? Math.min(today.getDate(), lastDay) : lastDay;
+
+  const byDay = new Map(aggregateByDay(entries, holidaySet).map(d => [d.datum, d]));
+  const ist = entries.reduce((s, e) => s + Number(e?.stunden || 0), 0);
+
+  let soll = 0;
+  let saldo = 0;
+  const fehlendeWerktage: string[] = [];
+
+  for (let day = 1; day <= endDay; day++) {
+    const dateObj = new Date(year, month - 1, day, 12, 0, 0);
+    const datum = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    // Soll bewusst OHNE holidaySet: ein Feiertag Mo-Do zählt mit 10 h ins
+    // Monats-Soll (Juni 2026 = 18 Werktage = 180 h) und wird unten neutralisiert.
+    const tagesSoll = getNormalWorkingHours(dateObj);
+    const istFeiertag = holidaySet?.has(datum) === true;
+    soll += tagesSoll;              // 0 an Fr/Sa/So
+
+    const bal = byDay.get(datum);
+    if (bal) {
+      // Auch an arbeitsfreien Tagen zählen: Freitags-/Wochenendarbeit hat
+      // Soll 0 und damit den vollen Ist-Wert als Plus.
+      saldo += bal.saldo;           // Abwesenheit/Feiertag = 0, sonst ist − soll
+    } else if (tagesSoll > 0 && !istFeiertag) {
+      saldo -= tagesSoll;           // Werktag ganz ohne Erfassung
+      fehlendeWerktage.push(datum);
+    }
+    // Feiertag ohne Buchung: Soll gezählt, Saldo neutral (gilt als erfüllt).
+  }
+
+  return { ist, soll, saldo, fehlendeWerktage, bisHeute: isCurrentMonth };
 }
 
 /** Saldo-Summe über die gegebenen Einträge — Auto-Saldo aus time_entries. */

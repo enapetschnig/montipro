@@ -16,7 +16,7 @@ import {
 import {
   Home, Clock, FolderKanban, LayoutGrid, CalendarDays,
   Receipt, ClipboardList, FileText, UserPlus, MessageSquare,
-  BookUser, Package, BarChart3, Shield, LogOut, FileDown, Mail,
+  BookUser, Package, BarChart3, Shield, LogOut, FileDown, Mail, Users,
 } from "lucide-react";
 import { usePermissions, type FeatureKey } from "@/hooks/usePermissions";
 import { supabase } from "@/integrations/supabase/client";
@@ -64,6 +64,10 @@ const MENU_GROUPS: MenuGroup[] = [
       { title: "Materialien", path: "/materials", icon: Package, feature: "materialien" },
       { title: "Meine Stunden", path: "/my-hours", icon: BarChart3, feature: null },
       { title: "Stundenauswertung", path: "/hours-report", icon: BarChart3, feature: "stundenauswertung" },
+      // Mitarbeiterverwaltung inkl. Archiv ausgeschiedener Mitarbeiter — war
+      // bisher nur über eine Dashboard-Kachel erreichbar und damit praktisch
+      // unauffindbar (User-Feedback 21.07.2026).
+      { title: "Mitarbeiter", path: "/employees", icon: Users, feature: "stundenauswertung" },
     ],
   },
   {

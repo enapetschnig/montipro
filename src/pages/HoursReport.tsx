@@ -27,7 +27,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { getNormalWorkingHours } from "@/lib/workingHours";
-import { aggregateByDay, totalAutoSaldo, formatSaldo, type DayBalance, ortAnzeigeAusblenden } from "@/lib/hoursAccounting";
+import { aggregateByDay, aggregateMonth, totalAutoSaldo, formatSaldo, type DayBalance, ortAnzeigeAusblenden, SONDER_TAETIGKEITEN, ZEITAUSGLEICH_TAETIGKEIT } from "@/lib/hoursAccounting";
 import { useAustrianHolidays } from "@/hooks/useAustrianHolidays";
 
 interface TimeEntry {
@@ -302,9 +302,16 @@ export default function HoursReport() {
   const monthDays = generateMonthDays();
   // Per-Tag-Aggregation aus dem Helper — Multi-Project-Tage fließen
   // korrekt zusammen, Minusstunden bleiben erhalten.
-  const totalHours = dayBalances.reduce((s, d) => s + d.ist, 0);
-  const totalSaldo = dayBalances.reduce((s, d) => s + d.saldo, 0);
-  const totalSoll = dayBalances.reduce((s, d) => s + d.soll, 0);
+  // Monats-Soll KALENDER-basiert (alle Mo-Do ohne Feiertage) — nicht nur über
+  // Tage mit Einträgen, sonst schrumpft das Soll um jeden Abwesenheits- und
+  // jeden nicht erfassten Tag. Werktage ohne Erfassung erzeugen ein Minus.
+  const monthBalance = useMemo(
+    () => aggregateMonth(timeEntries as any, year, month, holidaySet),
+    [timeEntries, year, month, holidaySet],
+  );
+  const totalHours = monthBalance.ist;
+  const totalSaldo = monthBalance.saldo;
+  const totalSoll = monthBalance.soll;
   // Stundenkonto-Status aus time_accounts (manuelle Buchungen) +
   // Live-Auto-Saldo über ALLE time_entries des Mitarbeiters (nicht
   // nur des aktuellen Monats). Wird im Header-Block angezeigt.
@@ -790,14 +797,20 @@ export default function HoursReport() {
                       <div>
                         <p className="text-sm text-muted-foreground">Gesamtstunden</p>
                         <p className="text-2xl font-bold">{totalHours.toFixed(2)} h</p>
-                        <p className="text-[10px] text-muted-foreground">Soll: {totalSoll.toFixed(2)} h</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          Soll: {totalSoll.toFixed(2)} h{monthBalance.bisHeute ? " (bis heute)" : ""}
+                        </p>
                       </div>
                       <div>
                         <p className="text-sm text-muted-foreground">Saldo Monat</p>
                         <p className={`text-2xl font-bold ${totalSaldo > 0.005 ? "text-green-600" : totalSaldo < -0.005 ? "text-red-600" : ""}`}>
                           {formatSaldo(totalSaldo)} h
                         </p>
-                        <p className="text-[10px] text-muted-foreground">+ Überstunden / − Minusstunden</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {monthBalance.fehlendeWerktage.length > 0
+                            ? `${monthBalance.fehlendeWerktage.length} Werktag${monthBalance.fehlendeWerktage.length === 1 ? "" : "e"} ohne Erfassung`
+                            : "+ Überstunden / − Minusstunden"}
+                        </p>
                       </div>
                       <div>
                         <p className="text-sm text-muted-foreground">Stundenkonto effektiv</p>
@@ -901,7 +914,12 @@ export default function HoursReport() {
                               const isSonderzeit = ortAnzeigeAusblenden(entry.taetigkeit);
                               const ortIcon = isSonderzeit ? "" : entry.location_type === "baustelle" ? "🏗️" : entry.location_type === "werkstatt" ? "🏢" : "";
                               const ortText = isSonderzeit ? "" : entry.location_type === "baustelle" ? "Baustelle" : entry.location_type === "werkstatt" ? "Firma" : "";
-                              const projektName = entry.taetigkeit === "Urlaub" || entry.taetigkeit === "Krankenstand"
+                              // Bei ALLEN Abwesenheiten (Urlaub, Krankenstand, ZA,
+                              // Feiertag, Weiterbildung) die Tätigkeit als "Projekt"
+                              // zeigen — sonst bleibt die Spalte leer und der Tag
+                              // sieht aus wie ein normaler Arbeitstag.
+                              const isZeitausgleich = entry.taetigkeit === ZEITAUSGLEICH_TAETIGKEIT;
+                              const projektName = isSonderzeit
                                 ? entry.taetigkeit
                                 : (project?.name || "");
                               const isFirstEntry = entryIndex === 0;
@@ -930,6 +948,13 @@ export default function HoursReport() {
                                   <TableCell>{entry.pause_minutes > 0 ? `${entry.pause_minutes} Min` : '-'}</TableCell>
                                   <TableCell className="text-right font-medium">
                                     {entry.stunden.toFixed(2)} h
+                                    {/* Zeitausgleich zehrt vom Zeitkonto — als Minus kennzeichnen,
+                                        damit die 10 h nicht wie Plusstunden wirken. */}
+                                    {isZeitausgleich && (
+                                      <div className="text-[10px] text-red-600 font-semibold mt-0.5 whitespace-nowrap">
+                                        −{entry.stunden.toFixed(2)} h Zeitkonto
+                                      </div>
+                                    )}
                                     {hasMultipleEntries && isLastEntry && (
                                       <div className="text-xs text-primary font-bold mt-1">
                                         Σ {dayTotalHours.toFixed(2)} h
@@ -940,7 +965,7 @@ export default function HoursReport() {
                                     {isFirstEntry && dayBal && Math.abs(dayBal.saldo) >= 0.005 && (
                                       <span className={cn(
                                         "font-medium",
-                                        dayBal.saldo > 0 ? "text-orange-600" : "text-red-600"
+                                        dayBal.saldo > 0 ? "text-green-600" : "text-red-600"
                                       )}>
                                         {formatSaldo(dayBal.saldo)} h
                                       </span>
@@ -1043,7 +1068,7 @@ export default function HoursReport() {
                           </TableCell>
                           <TableCell className={cn(
                             "text-right font-bold",
-                            totalSaldo > 0.005 ? "text-orange-600" : totalSaldo < -0.005 ? "text-red-600" : ""
+                            totalSaldo > 0.005 ? "text-green-600" : totalSaldo < -0.005 ? "text-red-600" : ""
                           )}>
                             {formatSaldo(totalSaldo)} h
                           </TableCell>

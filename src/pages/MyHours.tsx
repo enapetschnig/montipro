@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Clock, Building2, Hammer, Pencil, Trash2, TrendingUp, Wallet } from "lucide-react";
 import { getTotalWorkingHours } from "@/lib/workingHours";
-import { aggregateByDay, totalAutoSaldo, formatSaldo, ortAnzeigeAusblenden } from "@/lib/hoursAccounting";
+import { aggregateByDay, aggregateMonth, totalAutoSaldo, formatSaldo, ortAnzeigeAusblenden, ZEITAUSGLEICH_TAETIGKEIT } from "@/lib/hoursAccounting";
 import { useAustrianHolidays } from "@/hooks/useAustrianHolidays";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -311,26 +311,31 @@ const MyHours = () => {
               </div>
               <div className="text-sm sm:text-base space-y-0.5">
                 {(() => {
-                  // Soll & Saldo aus derselben Logik wie die Auto-Saldo-Karte
-                  // (hoursAccounting.aggregateByDay) — verhindert die Inkonsistenz,
-                  // dass Header und Karte unterschiedliche Werte zeigen. Sonderzeit
-                  // (inkl. Zeitausgleich) und Feiertage: Soll=0, Saldo=0 (neutral;
-                  // der ZA-Abzug läuft einmalig über das Zeitkonto/Manuell).
-                  const sollTotal = dayBalances.reduce((s, d) => s + d.soll, 0);
-                  const saldoMonat = dayBalances.reduce((s, d) => s + d.saldo, 0);
+                  // Soll KALENDER-basiert über alle Werktage des Monats (nicht nur
+                  // über Tage mit Einträgen) — im laufenden Monat bis heute.
+                  // Abwesenheiten sind neutral, Werktage ohne Erfassung ergeben Minus.
+                  const [my, mm] = selectedMonth.split("-").map(Number);
+                  const mb = aggregateMonth(entries as any, my, mm, holidaySet);
                   return (
                     <>
                       <div>
                         <span className="text-muted-foreground">Ist: </span>
-                        <span className="font-bold text-lg text-primary">{totalHours.toFixed(2)} Std.</span>
+                        <span className="font-bold text-lg text-primary">{mb.ist.toFixed(2)} Std.</span>
                         <span className="text-muted-foreground ml-2">Soll: </span>
-                        <span className="font-medium">{sollTotal.toFixed(2)} Std.</span>
+                        <span className="font-medium">
+                          {mb.soll.toFixed(2)} Std.{mb.bisHeute ? " (bis heute)" : ""}
+                        </span>
                       </div>
                       <div>
                         <span className="text-muted-foreground">Saldo Monat: </span>
-                        <span className={`font-bold ${saldoMonat >= 0 ? "text-green-600" : "text-red-600"}`}>
-                          {formatSaldo(saldoMonat)} Std.
+                        <span className={`font-bold ${mb.saldo > 0.005 ? "text-green-600" : mb.saldo < -0.005 ? "text-red-600" : ""}`}>
+                          {formatSaldo(mb.saldo)} Std.
                         </span>
+                        {mb.fehlendeWerktage.length > 0 && (
+                          <span className="text-xs text-muted-foreground ml-2">
+                            ({mb.fehlendeWerktage.length} Werktag{mb.fehlendeWerktage.length === 1 ? "" : "e"} ohne Erfassung)
+                          </span>
+                        )}
                       </div>
                     </>
                   );
@@ -404,11 +409,29 @@ const MyHours = () => {
                                   )}
                                 </div>
                               </TableCell>
-                              <TableCell className="text-sm">{entry.projects?.name || '-'}</TableCell>
+                              {/* Bei Abwesenheiten (ZA, Urlaub, …) steht die Tätigkeit in der
+                                  Projekt-Spalte — sonst sieht der Tag aus wie normale Arbeit. */}
+                              <TableCell className="text-sm">
+                                {ortAnzeigeAusblenden(entry.taetigkeit) ? (
+                                  <span className={entry.taetigkeit === ZEITAUSGLEICH_TAETIGKEIT
+                                    ? "font-medium text-red-600"
+                                    : "font-medium text-muted-foreground"}>
+                                    {entry.taetigkeit}
+                                  </span>
+                                ) : (entry.projects?.name || '-')}
+                              </TableCell>
                               <TableCell className="text-center text-sm">{entry.start_time?.substring(0, 5) || '-'}</TableCell>
                               <TableCell className="text-center text-sm">{entry.end_time?.substring(0, 5) || '-'}</TableCell>
                               <TableCell className="text-center text-sm">{entry.pause_minutes ? `${entry.pause_minutes} Min` : '-'}</TableCell>
-                              <TableCell className="text-right font-semibold">{entry.stunden.toFixed(2)} h</TableCell>
+                              <TableCell className="text-right font-semibold">
+                                {entry.stunden.toFixed(2)} h
+                                {/* ZA zehrt vom Zeitkonto → als Minus kennzeichnen. */}
+                                {entry.taetigkeit === ZEITAUSGLEICH_TAETIGKEIT && (
+                                  <div className="text-[10px] text-red-600 font-semibold mt-0.5 whitespace-nowrap">
+                                    −{entry.stunden.toFixed(2)} h Zeitkonto
+                                  </div>
+                                )}
+                              </TableCell>
                               <TableCell className="text-right">
                                 {idx === 0 && dayBal && Math.abs(dayBal.saldo) >= 0.005 ? (
                                   <span className={`font-medium ${dayBal.saldo > 0 ? "text-green-600" : "text-red-600"}`}>

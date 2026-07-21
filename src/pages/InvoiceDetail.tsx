@@ -297,7 +297,10 @@ export default function InvoiceDetail() {
     nummer: "",
     laufnummer: 0,
     jahr: new Date().getFullYear(),
-    status: defaultTyp === "rechnung" ? "offen" : "entwurf",
+    // Alle echten Rechnungs-Typen starten als "offen" — Anzahlungs- und
+    // Schlussrechnungen blieben sonst auf "entwurf" und wurden in der
+    // Rechnungsübersicht NICHT als offener Betrag mitgezählt.
+    status: ["rechnung", "anzahlungsrechnung", "schlussrechnung"].includes(defaultTyp) ? "offen" : "entwurf",
     kunde_name: "",
     kunde_anrede: "",
     kunde_titel: "",
@@ -1226,8 +1229,13 @@ export default function InvoiceDetail() {
         }
       }
 
-      // Rechnungen sind immer mindestens "offen", Angebote behalten ihren Status (auch "entwurf")
-      const saveStatus = form.typ === "rechnung" ? "offen" : (form.status || "offen");
+      // Alle Rechnungs-Typen (Rechnung, Anzahlungs-, Schlussrechnung) sind beim
+      // Speichern mindestens "offen" — ein "entwurf" wird angehoben. Bereits
+      // weiter fortgeschrittene Status (teilbezahlt/bezahlt/storniert) bleiben.
+      // Angebote/AB behalten ihren Status (auch "entwurf").
+      const saveStatus = ["rechnung", "anzahlungsrechnung", "schlussrechnung"].includes(form.typ)
+        ? (form.status && form.status !== "entwurf" ? form.status : "offen")
+        : (form.status || "offen");
 
       // Defensive Parent-Normalisierung: für AR/SR muss parent_invoice_id
       // auf einen echten Positionsträger (Angebot oder AB) zeigen — niemals
@@ -1869,7 +1877,7 @@ export default function InvoiceDetail() {
           nummer,
           laufnummer,
           jahr: new Date().getFullYear(),
-          status: form.typ === "rechnung" ? "offen" : "entwurf",
+          status: ["rechnung", "anzahlungsrechnung", "schlussrechnung"].includes(form.typ) ? "offen" : "entwurf",
           kunde_name: form.kunde_name,
           kunde_adresse: form.kunde_adresse || null,
           kunde_plz: form.kunde_plz || null,
