@@ -198,6 +198,19 @@ export function AdminTimeEntryDialog({
       toast({ variant: "destructive", title: "Tätigkeit fehlt" });
       return;
     }
+    // Abwesenheiten dürfen hier NICHT angelegt werden: dieser Dialog bucht
+    // nichts auf das Zeitkonto. Ein hier angelegter Zeitausgleich wäre
+    // "gratis" — beim späteren Löschen würden die Stunden aber gutgeschrieben,
+    // und das Zeitkonto driftet nach oben (live passiert: +8 h Gutschrift ohne
+    // vorherigen Abzug). Anlegen läuft über "Abwesenheit nachtragen".
+    if (!isEdit && ABWESENHEITS_TAETIGKEITEN.has(form.taetigkeit.trim())) {
+      toast({
+        variant: "destructive",
+        title: "Bitte über „Abwesenheit nachtragen“ anlegen",
+        description: `${form.taetigkeit.trim()} muss über den Abwesenheits-Dialog erfasst werden — nur dort wird das Zeitkonto korrekt verbucht.`,
+      });
+      return;
+    }
     if (form.location_type === "baustelle" && !form.project_id) {
       toast({ variant: "destructive", title: "Projekt fehlt", description: "Bei Baustelle ist ein Projekt erforderlich." });
       return;

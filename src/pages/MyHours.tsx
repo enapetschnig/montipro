@@ -426,12 +426,17 @@ const MyHours = () => {
                                   Projekt-Spalte — sonst sieht der Tag aus wie normale Arbeit. */}
                               <TableCell className="text-sm">
                                 {ortAnzeigeAusblenden(entry.taetigkeit) ? (
-                                  <span className={entry.taetigkeit === ZEITAUSGLEICH_TAETIGKEIT
+                                  <span className={entry.taetigkeit?.trim() === ZEITAUSGLEICH_TAETIGKEIT
                                     ? "font-medium text-red-600"
                                     : "font-medium text-muted-foreground"}>
                                     {entry.taetigkeit}
                                   </span>
-                                ) : (entry.projects?.name || '-')}
+                                ) : (
+                                  // Ohne Projekt (z.B. Büro/Werkstatt) die Tätigkeit
+                                  // zeigen statt nur "-" — sonst steht in der Zeile
+                                  // gar nicht, was gemacht wurde.
+                                  entry.projects?.name || entry.taetigkeit || '-'
+                                )}
                               </TableCell>
                               <TableCell className="text-center text-sm">{entry.start_time?.substring(0, 5) || '-'}</TableCell>
                               <TableCell className="text-center text-sm">{entry.end_time?.substring(0, 5) || '-'}</TableCell>
