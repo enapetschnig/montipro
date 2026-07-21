@@ -55,6 +55,12 @@ export default defineConfig(({ mode }) => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  // Unit-Tests (vitest) nur aus src/. Die Playwright-E2E-Specs unter tests/
+  // brauchen einen anderen Runner und würden hier fälschlich fehlschlagen.
+  test: {
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    exclude: ["**/node_modules/**", "**/dist/**", "tests/**", ".claude/**"],
+  },
   build: {
     // Größere schwere Libs in eigene Chunks → kleinerer First-Load.
     rollupOptions: {

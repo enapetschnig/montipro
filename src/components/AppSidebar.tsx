@@ -67,7 +67,10 @@ const MENU_GROUPS: MenuGroup[] = [
       // Mitarbeiterverwaltung inkl. Archiv ausgeschiedener Mitarbeiter — war
       // bisher nur über eine Dashboard-Kachel erreichbar und damit praktisch
       // unauffindbar (User-Feedback 21.07.2026).
-      { title: "Mitarbeiter", path: "/employees", icon: Users, feature: "stundenauswertung" },
+      // feature "admin", weil Employees.tsx selbst auf role='administrator'
+      // prüft — mit einem schwächeren Recht sähe man den Punkt und würde beim
+      // Klick mit "Keine Berechtigung" rausgeworfen.
+      { title: "Mitarbeiter", path: "/employees", icon: Users, feature: "admin" },
     ],
   },
   {
