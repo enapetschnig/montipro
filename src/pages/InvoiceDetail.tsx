@@ -1110,60 +1110,61 @@ export default function InvoiceDetail() {
       toast({ variant: "destructive", title: "Fehler", description: "Kundenname ist erforderlich" });
       return false;
     }
+    // Validierungs-Abbruch: IMMER auch setSaving(false), sonst bleibt der
+    // Speichern-Button dauerhaft gesperrt (handleSave blockt sich zusätzlich
+    // über `if (saving) return false`) und es lässt sich gar nicht mehr
+    // speichern, bis die Seite neu geladen wird.
+    const abbruch = (title: string, description: string) => {
+      setSaving(false);
+      toast({ variant: "destructive", title, description });
+      return false;
+    };
+
     // Validate ALL items, not just the first
     const validItems = items.filter(item => item.beschreibung.trim());
     if (validItems.length === 0) {
-      toast({ variant: "destructive", title: "Fehler", description: "Mindestens eine Position mit Beschreibung ist erforderlich" });
-      return false;
+      return abbruch("Fehler", "Mindestens eine Position mit Beschreibung ist erforderlich");
     }
 
-    // Rechnungsbetrag muss > 0 sein (außer bei Entwürfen)
-    const saveBrutto = validItems.reduce((sum, item) => {
-      const netto = item.menge * item.einzelpreis * (1 - (item.rabatt_prozent || 0) / 100);
-      return sum + netto * (1 + (form.mwst_satz / 100));
-    }, 0);
-    if (saveBrutto <= 0 && form.status !== "entwurf") {
-      toast({ variant: "destructive", title: "Fehler", description: "Rechnungsbetrag muss größer als €0,00 sein" });
-      return false;
+    // Rechnungsbetrag muss > 0 sein (außer bei Entwürfen). bruttoSumme statt
+    // eigener Rechnung: die lokale Variante ignorierte mwst_exempt-Zeilen
+    // (z.B. Anzahlungs-Abzüge in Schlussrechnungen) sowie Rabatt/Nachlass und
+    // konnte legitime Rechnungen fälschlich blockieren.
+    if (bruttoSumme <= 0 && form.status !== "entwurf") {
+      return abbruch("Fehler", "Rechnungsbetrag muss größer als €0,00 sein");
     }
 
     // Skonto-Prozent muss zwischen 0 und 100 sein
     if (form.skonto_prozent < 0 || form.skonto_prozent > 100) {
-      toast({ variant: "destructive", title: "Ungültiger Skonto", description: "Skonto muss zwischen 0% und 100% liegen" });
-      return false;
+      return abbruch("Ungültiger Skonto", "Skonto muss zwischen 0% und 100% liegen");
     }
 
     // Rabatt-Prozent muss zwischen 0 und 100 sein
     if ((form.rabatt_prozent ?? 0) < 0 || (form.rabatt_prozent ?? 0) > 100) {
-      toast({ variant: "destructive", title: "Ungültiger Rabatt", description: "Rabatt muss zwischen 0% und 100% liegen" });
-      return false;
+      return abbruch("Ungültiger Rabatt", "Rabatt muss zwischen 0% und 100% liegen");
     }
 
     // Rabatt-Betrag darf den Netto-Summe nicht überschreiten
-    const positionenNetto = validItems.reduce((sum, item) => sum + item.menge * item.einzelpreis * (1 - (item.rabatt_prozent || 0) / 100), 0);
-    if (form.rabatt_betrag > positionenNetto) {
-      toast({ variant: "destructive", title: "Ungültiger Rabatt", description: `Rabatt-Betrag (€${form.rabatt_betrag.toFixed(2)}) darf die Netto-Summe (€${positionenNetto.toFixed(2)}) nicht überschreiten` });
-      return false;
+    const positionenNettoCheck = validItems.reduce((sum, item) => sum + item.menge * item.einzelpreis * (1 - (item.rabatt_prozent || 0) / 100), 0);
+    if (form.rabatt_betrag > positionenNettoCheck) {
+      return abbruch("Ungültiger Rabatt", `Rabatt-Betrag (€${form.rabatt_betrag.toFixed(2)}) darf die Netto-Summe (€${positionenNettoCheck.toFixed(2)}) nicht überschreiten`);
     }
 
     // Pro-Position Rabatt prüfen
     const invalidRabatt = items.find(i => (i.rabatt_prozent ?? 0) < 0 || (i.rabatt_prozent ?? 0) > 100);
     if (invalidRabatt) {
-      toast({ variant: "destructive", title: "Ungültiger Positions-Rabatt", description: "Rabatt pro Position muss zwischen 0% und 100% liegen" });
-      return false;
+      return abbruch("Ungültiger Positions-Rabatt", "Rabatt pro Position muss zwischen 0% und 100% liegen");
     }
 
     // Reverse Charge: UID-Nummer des Kunden ist Pflicht (§ 19 UStG)
     if ((form as any).reverse_charge && !form.kunde_uid?.trim()) {
-      toast({ variant: "destructive", title: "Fehler", description: "Bei Reverse Charge ist die UID-Nummer des Kunden Pflicht" });
-      return false;
+      return abbruch("Fehler", "Bei Reverse Charge ist die UID-Nummer des Kunden Pflicht");
     }
     // Reverse Charge: eigene Firmen-UID ist Pflicht (§ 19 UStG)
     if ((form as any).reverse_charge) {
       const { data: firmenUidSetting } = await supabase.from("app_settings").select("value").eq("key", "firmen_uid").maybeSingle();
       if (!firmenUidSetting?.value?.trim()) {
-        toast({ variant: "destructive", title: "Eigene UID fehlt", description: "Bei Reverse Charge ist die UID-Nummer des Ausstellers Pflicht. Bitte im Admin-Bereich konfigurieren." });
-        return false;
+        return abbruch("Eigene UID fehlt", "Bei Reverse Charge ist die UID-Nummer des Ausstellers Pflicht. Bitte im Admin-Bereich konfigurieren.");
       }
     }
 

@@ -590,7 +590,20 @@ export default function Invoices() {
               </div>
             );
           }
-          const visibleInvoices = invoices.filter(i => i.typ === filterTyp && i.status !== "storniert");
+          // Gleiche Typ-Auswahl wie die Liste unten: der "Rechnungen"-Tab
+          // umfasst auch Anzahlungs-/Schluss-Rechnungen. Vorher filterte die
+          // Statistik strikt auf typ === "rechnung" — AR/SR tauchten in der
+          // Liste auf, wurden aber bei "Offener Betrag"/"Überfällig" NIE
+          // mitgezählt (unabhängig vom Status).
+          const visibleInvoices = invoices.filter(i => {
+            if (i.status === "storniert") return false;
+            if (filterTyp === "rechnung") {
+              if (!INVOICE_LIKE_TYPES.has(i.typ)) return false;
+              return filterSubTyp === "alle" || i.typ === filterSubTyp;
+            }
+            if (filterTyp === "angebot") return i.typ === "angebot";
+            return i.typ === filterTyp;
+          });
           const count = visibleInvoices.length;
           const openBrutto = visibleInvoices.filter(i => PAYABLE_INVOICE_TYPES.has(i.typ) && (i.status === "offen" || i.status === "teilbezahlt")).reduce((s, i) => s + (Number(i.brutto_summe) - Number(i.bezahlt_betrag || 0)), 0);
           const overdue = visibleInvoices.filter(i => isOverdue(i)).length;

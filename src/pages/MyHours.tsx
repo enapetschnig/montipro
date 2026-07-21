@@ -50,6 +50,8 @@ const MyHours = () => {
   // time_accounts.balance_hours.
   const [autoSaldoAll, setAutoSaldoAll] = useState<number>(0);
   const [manualSaldo, setManualSaldo] = useState<number>(0);
+  // Ein-/Austrittsdatum: außerhalb davon entsteht kein Soll und kein Minus.
+  const [beschaeftigung, setBeschaeftigung] = useState<{ eintritt?: string | null; austritt?: string | null }>({});
 
   useEffect(() => {
     fetchEntries();
@@ -62,15 +64,18 @@ const MyHours = () => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const [{ data: acc }, { data: allEntries }] = await Promise.all([
+      const [{ data: acc }, { data: allEntries }, { data: emp }] = await Promise.all([
         (supabase.from("time_accounts" as never) as any)
           .select("balance_hours").eq("user_id", user.id).maybeSingle(),
         supabase.from("time_entries")
           .select("datum, stunden, taetigkeit").eq("user_id", user.id),
+        (supabase.from("employees" as never) as any)
+          .select("eintritt_datum, austritt_datum").eq("user_id", user.id).maybeSingle(),
       ]);
       if (cancelled) return;
       setManualSaldo(Number((acc as any)?.balance_hours) || 0);
       setAutoSaldoAll(totalAutoSaldo((allEntries as any[]) || [], holidaySet));
+      setBeschaeftigung({ eintritt: (emp as any)?.eintritt_datum ?? null, austritt: (emp as any)?.austritt_datum ?? null });
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -305,7 +310,11 @@ const MyHours = () => {
                   id="month-select"
                   type="month"
                   value={selectedMonth}
-                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  // Kein Zukunftsmonat wählbar (die Rechenlogik fängt es
+                  // zusätzlich ab) und leeres Feld ignorieren, damit aus
+                  // "" kein NaN-Monat entsteht.
+                  max={`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`}
+                  onChange={(e) => { if (e.target.value) setSelectedMonth(e.target.value); }}
                   className="w-44"
                 />
               </div>
@@ -315,7 +324,7 @@ const MyHours = () => {
                   // über Tage mit Einträgen) — im laufenden Monat bis heute.
                   // Abwesenheiten sind neutral, Werktage ohne Erfassung ergeben Minus.
                   const [my, mm] = selectedMonth.split("-").map(Number);
-                  const mb = aggregateMonth(entries as any, my, mm, holidaySet);
+                  const mb = aggregateMonth(entries as any, my, mm, holidaySet, new Date(), beschaeftigung);
                   return (
                     <>
                       <div>
@@ -323,7 +332,8 @@ const MyHours = () => {
                         <span className="font-bold text-lg text-primary">{mb.ist.toFixed(2)} Std.</span>
                         <span className="text-muted-foreground ml-2">Soll: </span>
                         <span className="font-medium">
-                          {mb.soll.toFixed(2)} Std.{mb.bisHeute ? " (bis heute)" : ""}
+                          {mb.soll.toFixed(2)} Std.
+                          {mb.zukunft ? " (Monat noch nicht begonnen)" : mb.bisHeute ? " (bis gestern)" : ""}
                         </span>
                       </div>
                       <div>
@@ -382,8 +392,11 @@ const MyHours = () => {
                         // Variablen referenziert aber nirgends deklariert →
                         // ReferenceError → ErrorBoundary zeigt "Hoppla".
                         const dayTotal = dayEntries.reduce((s, e) => s + Number(e.stunden || 0), 0);
-                        const sollH = getTotalWorkingHours(dateObj, holidaySet);
-                        const dayDiff = dayTotal - sollH;
+                        // Differenz aus DEMSELBEN Helper wie die Saldo-Spalte —
+                        // vorher wurde sie roh gerechnet und widersprach bei
+                        // Abwesenheiten der (neutralen) Saldo-Anzeige daneben.
+                        const dayDiff = dayBal?.saldo ?? 0;
+                        const zeigeDiff = Math.abs(dayDiff) >= 0.005;
                         dayEntries.forEach((entry, idx) => {
                           rows.push(
                             <TableRow key={entry.id} className={idx > 0 ? "border-t-0" : ""}>
@@ -453,13 +466,13 @@ const MyHours = () => {
                             <TableRow key={`sum-${datum}`} className="bg-muted/30">
                               <TableCell colSpan={6} className="text-right text-xs text-muted-foreground py-1">
                                 Tagesgesamt: <span className="font-medium text-foreground">{dayTotal.toFixed(2)} h</span>
-                                {sollH > 0 && (
-                                  <span className={`ml-2 ${dayDiff >= 0 ? "text-green-600" : "text-red-600"}`}>
-                                    ({dayDiff >= 0 ? "+" : ""}{dayDiff.toFixed(2)})
+                                {zeigeDiff && (
+                                  <span className={`ml-2 ${dayDiff > 0 ? "text-green-600" : "text-red-600"}`}>
+                                    ({formatSaldo(dayDiff)})
                                   </span>
                                 )}
                               </TableCell>
-                              <TableCell colSpan={2}></TableCell>
+                              <TableCell colSpan={3}></TableCell>
                             </TableRow>
                           );
                         }
@@ -471,7 +484,7 @@ const MyHours = () => {
                     <TableRow>
                       <TableCell colSpan={6} className="text-right font-semibold">Gesamt:</TableCell>
                       <TableCell className="text-right font-bold">{totalHours.toFixed(2)} h</TableCell>
-                      <TableCell></TableCell>
+                      <TableCell colSpan={2}></TableCell>
                     </TableRow>
                   </TableFooter>
                 </Table>

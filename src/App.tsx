@@ -100,7 +100,9 @@ function AppContent() {
           <Route path="/construction-sites" element={<ProtectedRoute><ConstructionSites /></ProtectedRoute>} />
           <Route path="/admin" element={<ProtectedRoute feature="admin"><Admin /></ProtectedRoute>} />
           <Route path="/hours-report" element={<ProtectedRoute feature="stundenauswertung"><HoursReport /></ProtectedRoute>} />
-          <Route path="/employees" element={<ProtectedRoute><Employees /></ProtectedRoute>} />
+          {/* feature="admin": Employees prüft intern auf role='administrator' —
+              ohne Route-Guard sah man die Seite bis zur In-Page-Umleitung kurz. */}
+          <Route path="/employees" element={<ProtectedRoute feature="admin"><Employees /></ProtectedRoute>} />
           <Route path="/notepad" element={<ProtectedRoute><Notepad /></ProtectedRoute>} />
           <Route path="/disturbances" element={<ProtectedRoute><Disturbances /></ProtectedRoute>} />
           <Route path="/disturbances/:id" element={<ProtectedRoute><DisturbanceDetail /></ProtectedRoute>} />

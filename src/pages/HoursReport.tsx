@@ -306,8 +306,8 @@ export default function HoursReport() {
   // Tage mit Einträgen, sonst schrumpft das Soll um jeden Abwesenheits- und
   // jeden nicht erfassten Tag. Werktage ohne Erfassung erzeugen ein Minus.
   const monthBalance = useMemo(
-    () => aggregateMonth(timeEntries as any, year, month, holidaySet),
-    [timeEntries, year, month, holidaySet],
+    () => aggregateMonth(timeEntries as any, year, month, holidaySet, new Date(), beschaeftigung),
+    [timeEntries, year, month, holidaySet, beschaeftigung],
   );
   const totalHours = monthBalance.ist;
   const totalSaldo = monthBalance.saldo;
@@ -317,22 +317,29 @@ export default function HoursReport() {
   // nur des aktuellen Monats). Wird im Header-Block angezeigt.
   const [manualBalance, setManualBalance] = useState<number>(0);
   const [autoBalanceAll, setAutoBalanceAll] = useState<number>(0);
+  // Ein-/Austrittsdatum: außerhalb davon darf kein Soll und kein Minus entstehen.
+  const [beschaeftigung, setBeschaeftigung] = useState<{ eintritt?: string | null; austritt?: string | null }>({});
   useEffect(() => {
     if (!selectedUserId) return;
     let cancelled = false;
     (async () => {
-      const [{ data: acc }, { data: allEntries }] = await Promise.all([
+      const [{ data: acc }, { data: allEntries }, { data: emp }] = await Promise.all([
         (supabase.from("time_accounts" as never) as any)
           .select("balance_hours").eq("user_id", selectedUserId).maybeSingle(),
         supabase.from("time_entries")
           .select("datum, stunden, taetigkeit").eq("user_id", selectedUserId),
+        (supabase.from("employees" as never) as any)
+          .select("eintritt_datum, austritt_datum").eq("user_id", selectedUserId).maybeSingle(),
       ]);
       if (cancelled) return;
       setManualBalance(Number((acc as any)?.balance_hours) || 0);
       setAutoBalanceAll(totalAutoSaldo((allEntries as any[]) || [], holidaySet));
+      setBeschaeftigung({ eintritt: (emp as any)?.eintritt_datum ?? null, austritt: (emp as any)?.austritt_datum ?? null });
     })();
     return () => { cancelled = true; };
-  }, [selectedUserId]);
+    // holidaySet als Dependency: der Hook lädt asynchron — ohne sie bliebe
+    // der Auto-Saldo dauerhaft ohne Feiertags-Berücksichtigung stehen.
+  }, [selectedUserId, holidaySet]);
 
   const addBordersToCell = (cell: any, thick: boolean = false, centered: boolean = false) => {
     const borderStyle = thick ? "medium" : "thin";
@@ -410,8 +417,10 @@ export default function HoursReport() {
             ? ""
             : entry.location_type === "baustelle" ? "Baustelle" : "Werkstatt";
           
-          // Projekt-Spalte: Urlaub/Krankenstand/Weiterbildung, Störung oder Projektname
-          const isAbsence = ["Urlaub", "Krankenstand", "Weiterbildung", "Feiertag"].includes(entry.taetigkeit);
+          // Projekt-Spalte: Abwesenheit, Störung oder Projektname. Zentrale
+          // Liste nutzen (enthält u.a. Zeitausgleich) — die frühere lokale
+          // Liste ließ ZA im Export leer, während der Bildschirm ihn zeigt.
+          const isAbsence = ortAnzeigeAusblenden(entry.taetigkeit);
           const isDisturbance = entry.disturbance_id != null || entry.taetigkeit?.startsWith("Störungseinsatz");
           
           let projektName = "";
@@ -492,7 +501,10 @@ export default function HoursReport() {
         // Tagessumme wenn mehrere Einträge am Tag — Saldo aus dem
         // Helper, NICHT mehr per-Entry summieren.
         if (dayEntries.length > 1) {
-          const datumStr = dayDate.toISOString().slice(0, 10);
+          // NICHT toISOString() — dayDate ist lokale Mitternacht, in
+          // Europe/Vienna liefert toISOString dadurch den VORTAG und die
+          // Tagessumme zeigte Werte eines fremden Tages.
+          const datumStr = format(dayDate, "yyyy-MM-dd");
           const dayBal = getDayBal(datumStr);
           const dayTotalHours = dayBal?.ist ?? dayEntries.reduce((sum, e) => sum + e.stunden, 0);
           if (includeOvertime) {
@@ -798,7 +810,8 @@ export default function HoursReport() {
                         <p className="text-sm text-muted-foreground">Gesamtstunden</p>
                         <p className="text-2xl font-bold">{totalHours.toFixed(2)} h</p>
                         <p className="text-[10px] text-muted-foreground">
-                          Soll: {totalSoll.toFixed(2)} h{monthBalance.bisHeute ? " (bis heute)" : ""}
+                          Soll: {totalSoll.toFixed(2)} h
+                          {monthBalance.zukunft ? " (Monat noch nicht begonnen)" : monthBalance.bisHeute ? " (bis gestern)" : ""}
                         </p>
                       </div>
                       <div>
@@ -1075,7 +1088,9 @@ export default function HoursReport() {
                           <TableCell className="text-right font-bold text-blue-600">
                             {timeEntries.reduce((s, e) => s + (e.wetterschicht_stunden || 0), 0).toFixed(2)}
                           </TableCell>
-                          <TableCell colSpan={isAdmin ? 4 : 3}></TableCell>
+                          {/* Header hat 11 Spalten + Admin-Aktionsspalte; davor
+                              stehen 4+1+1+1 = 7 Zellen → Rest 4 bzw. 5. */}
+                          <TableCell colSpan={isAdmin ? 5 : 4}></TableCell>
                         </TableRow>
                       </TableFooter>
                     </Table>

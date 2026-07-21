@@ -71,8 +71,10 @@ export function aggregateByDay(entries: TimeEntryLite[], holidaySet?: Set<string
   const out: DayBalance[] = [];
   for (const [datum, dayEntries] of grouped) {
     const ist = dayEntries.reduce((s, e) => s + Number(e.stunden || 0), 0);
+    // trim(), weil taetigkeit an mehreren Stellen ein freies Textfeld ist und
+    // Leerzeichen sonst zu "kein Sonderzeit-Tag" führen würden.
     const istSonderzeit = dayEntries.some(
-      (e) => !!e.taetigkeit && SONDER_TAETIGKEITEN.has(e.taetigkeit),
+      (e) => !!e.taetigkeit && SONDER_TAETIGKEITEN.has(e.taetigkeit.trim()),
     );
     const isHoliday = holidaySet?.has(datum) === true;
 
@@ -86,13 +88,18 @@ export function aggregateByDay(entries: TimeEntryLite[], holidaySet?: Set<string
     let saldo: number;
     if (istSonderzeit || isHoliday) {
       // Das Tagessoll bleibt bestehen (der Tag WAR ein Arbeitstag) — es gilt
-      // durch die Abwesenheit bzw. den Feiertag als erfüllt, daher Saldo 0.
+      // durch die Abwesenheit bzw. den Feiertag als erfüllt, daher kein Minus.
       // Bewusst OHNE holidaySet gerechnet: auch ein Feiertag zählt mit seinen
       // 10 h ins Monats-Soll und wird durch die Feiertags-Buchung neutralisiert.
       // Früher wurde soll=0 gesetzt — dadurch schrumpfte das Monats-Soll um
       // jeden Abwesenheitstag (Juni 2026: 160 statt 180 h, Feedback 21.07.2026).
+      //
+      // Math.max(0, …): Wird an so einem Tag ZUSÄTZLICH gearbeitet (halber
+      // Urlaub + halber Arbeitstag, Arbeit am Feiertag, Mischtag), zählen die
+      // Mehrstunden als Plus. Ein Minus kann nie entstehen — die Abwesenheit
+      // deckt das Tagessoll ab, auch wenn weniger Stunden gebucht sind.
       soll = getNormalWorkingHours(new Date(datum + "T12:00:00"));
-      saldo = 0;
+      saldo = Math.max(0, ist - soll);
     } else {
       soll = getNormalWorkingHours(new Date(datum + "T12:00:00"), holidaySet);
       saldo = ist - soll;
@@ -115,8 +122,10 @@ export type MonthBalance = {
   saldo: number;
   /** Werktage im Zeitraum ohne jeden Eintrag (fehlende Zeiterfassung). */
   fehlendeWerktage: string[];
-  /** true = laufender Monat, Soll nur bis heute gerechnet. */
+  /** true = laufender Monat, Soll nur bis gestern gerechnet. */
   bisHeute: boolean;
+  /** true = Monat liegt komplett in der Zukunft (Soll 0, kein Minus). */
+  zukunft: boolean;
 };
 
 /**
@@ -136,14 +145,30 @@ export function aggregateMonth(
   month: number,          // 1-12
   holidaySet?: Set<string>,
   today: Date = new Date(),
+  /** Beschäftigungszeitraum (YYYY-MM-DD). Tage davor/danach zählen nicht. */
+  beschaeftigung?: { eintritt?: string | null; austritt?: string | null },
 ): MonthBalance {
+  // Ungültige Eingaben (leeres Monatsfeld → NaN) sicher abfangen, sonst
+  // laufen alle Folgerechnungen auf NaN.
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    return { ist: 0, soll: 0, saldo: 0, fehlendeWerktage: [], bisHeute: false, zukunft: false };
+  }
+
   const lastDay = new Date(year, month, 0).getDate();
-  const isCurrentMonth = today.getFullYear() === year && today.getMonth() + 1 === month;
-  const endDay = isCurrentMonth ? Math.min(today.getDate(), lastDay) : lastDay;
+  // Monats-Ordinalzahl statt reiner Gleichheitsprüfung — unterscheidet
+  // Vergangenheit / laufend / Zukunft. Ein Monat, der noch nicht begonnen hat,
+  // darf KEIN Soll erzeugen (sonst z.B. August im Juli mit Saldo −170 h).
+  const monthOrd = year * 12 + (month - 1);
+  const todayOrd = today.getFullYear() * 12 + today.getMonth();
+  const isCurrentMonth = monthOrd === todayOrd;
+  const isFutureMonth = monthOrd > todayOrd;
+  // Der HEUTIGE Tag wird noch nicht gewertet — der Arbeitstag läuft ja noch.
+  // Sonst stünde den ganzen Tag über ein "-10 h / 1 Werktag ohne Erfassung".
+  const endDay = isFutureMonth ? 0 : isCurrentMonth ? Math.min(today.getDate() - 1, lastDay) : lastDay;
 
   const byDay = new Map(aggregateByDay(entries, holidaySet).map(d => [d.datum, d]));
-  const ist = entries.reduce((s, e) => s + Number(e?.stunden || 0), 0);
 
+  let ist = 0;
   let soll = 0;
   let saldo = 0;
   const fehlendeWerktage: string[] = [];
@@ -153,15 +178,26 @@ export function aggregateMonth(
     const datum = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     // Soll bewusst OHNE holidaySet: ein Feiertag Mo-Do zählt mit 10 h ins
     // Monats-Soll (Juni 2026 = 18 Werktage = 180 h) und wird unten neutralisiert.
+    // Außerhalb des Beschäftigungsverhältnisses gibt es weder Soll noch
+    // fehlende Tage — sonst zeigt ein ausgeschiedener Mitarbeiter für jeden
+    // Folgemonat ein Minus (z.B. -160 h im Monat nach dem Austritt).
+    const eintritt = beschaeftigung?.eintritt;
+    const austritt = beschaeftigung?.austritt;
+    if ((eintritt && datum < eintritt) || (austritt && datum > austritt)) continue;
+
     const tagesSoll = getNormalWorkingHours(dateObj);
     const istFeiertag = holidaySet?.has(datum) === true;
     soll += tagesSoll;              // 0 an Fr/Sa/So
 
     const bal = byDay.get(datum);
     if (bal) {
+      // Ist im GLEICHEN Zeitfenster wie Soll summieren — sonst zählen im
+      // laufenden Monat vorab gebuchte Tage (z.B. Urlaub in der Zukunft) ins
+      // Ist, aber nicht ins Soll, und die drei Zahlen widersprechen sich.
+      ist += bal.ist;
       // Auch an arbeitsfreien Tagen zählen: Freitags-/Wochenendarbeit hat
       // Soll 0 und damit den vollen Ist-Wert als Plus.
-      saldo += bal.saldo;           // Abwesenheit/Feiertag = 0, sonst ist − soll
+      saldo += bal.saldo;
     } else if (tagesSoll > 0 && !istFeiertag) {
       saldo -= tagesSoll;           // Werktag ganz ohne Erfassung
       fehlendeWerktage.push(datum);
@@ -169,7 +205,7 @@ export function aggregateMonth(
     // Feiertag ohne Buchung: Soll gezählt, Saldo neutral (gilt als erfüllt).
   }
 
-  return { ist, soll, saldo, fehlendeWerktage, bisHeute: isCurrentMonth };
+  return { ist, soll, saldo, fehlendeWerktage, bisHeute: isCurrentMonth, zukunft: isFutureMonth };
 }
 
 /** Saldo-Summe über die gegebenen Einträge — Auto-Saldo aus time_entries. */
