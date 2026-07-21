@@ -59,6 +59,14 @@ const LOCATION_OPTIONS = [
 ];
 
 const ABWESENHEITS_TAETIGKEITEN = new Set(["Urlaub", "Krankenstand", "Weiterbildung", "Zeitausgleich", "Feiertag"]);
+/** Tätigkeit → leave_requests.type (für den Plantafel-Block). */
+const ABSENCE_LEAVE_TYPE: Record<string, string> = {
+  Urlaub: "urlaub",
+  Krankenstand: "krankenstand",
+  Zeitausgleich: "za",
+  Feiertag: "feiertag",
+  Weiterbildung: "weiterbildung",
+};
 
 export function AdminTimeEntryDialog({
   open, onClose, onSaved, userId, datum, entryId, employeeLabel,
@@ -198,19 +206,6 @@ export function AdminTimeEntryDialog({
       toast({ variant: "destructive", title: "Tätigkeit fehlt" });
       return;
     }
-    // Abwesenheiten dürfen hier NICHT angelegt werden: dieser Dialog bucht
-    // nichts auf das Zeitkonto. Ein hier angelegter Zeitausgleich wäre
-    // "gratis" — beim späteren Löschen würden die Stunden aber gutgeschrieben,
-    // und das Zeitkonto driftet nach oben (live passiert: +8 h Gutschrift ohne
-    // vorherigen Abzug). Anlegen läuft über "Abwesenheit nachtragen".
-    if (!isEdit && ABWESENHEITS_TAETIGKEITEN.has(form.taetigkeit.trim())) {
-      toast({
-        variant: "destructive",
-        title: "Bitte über „Abwesenheit nachtragen“ anlegen",
-        description: `${form.taetigkeit.trim()} muss über den Abwesenheits-Dialog erfasst werden — nur dort wird das Zeitkonto korrekt verbucht.`,
-      });
-      return;
-    }
     if (form.location_type === "baustelle" && !form.project_id) {
       toast({ variant: "destructive", title: "Projekt fehlt", description: "Bei Baustelle ist ein Projekt erforderlich." });
       return;
@@ -251,6 +246,57 @@ export function AdminTimeEntryDialog({
         }).select("id").single();
         if (error) throw error;
         targetId = (ins as any).id;
+
+        // Manuell nachgetragene Abwesenheit korrekt verbuchen — dieser Dialog
+        // tat das früher NICHT: ein hier angelegter Zeitausgleich belastete das
+        // Zeitkonto nie, beim Löschen wurden die Stunden aber gutgeschrieben →
+        // das Konto driftete nach oben (live passiert: +8 h ohne Abzug).
+        const neueTaetigkeit = form.taetigkeit.trim();
+        if (ABWESENHEITS_TAETIGKEITEN.has(neueTaetigkeit)) {
+          // a) Zeitausgleich zehrt vom Zeitkonto
+          if (neueTaetigkeit === "Zeitausgleich") {
+            const stunden = Number(form.stunden) || 0;
+            if (stunden > 0) {
+              const { data: acc } = await (supabase.from("time_accounts" as never) as any)
+                .select("balance_hours").eq("user_id", userId).maybeSingle();
+              const before = Number((acc as any)?.balance_hours) || 0;
+              const after = before - stunden;
+              if (acc) {
+                await (supabase.from("time_accounts" as never) as any)
+                  .update({ balance_hours: after, updated_at: new Date().toISOString() }).eq("user_id", userId);
+              } else {
+                await (supabase.from("time_accounts" as never) as any)
+                  .insert({ user_id: userId, balance_hours: after });
+              }
+              await (supabase.from("time_account_transactions" as never) as any).insert({
+                user_id: userId,
+                changed_by: callerId ?? null,
+                change_type: "za_abzug",
+                hours: -stunden,
+                balance_before: before,
+                balance_after: after,
+                reason: `Zeitausgleich ${form.datum} (Zeit-Eintrag nachgetragen)`,
+              });
+            }
+          }
+          // b) Plantafel-Block anlegen, falls für den Tag noch keiner existiert
+          const leaveTyp = ABSENCE_LEAVE_TYPE[neueTaetigkeit] || "urlaub";
+          const { data: vorhanden } = await (supabase.from("leave_requests" as never) as any)
+            .select("id").eq("user_id", userId).eq("type", leaveTyp)
+            .lte("start_date", form.datum).gte("end_date", form.datum).maybeSingle();
+          if (!vorhanden) {
+            await (supabase.from("leave_requests" as never) as any).insert({
+              user_id: userId,
+              type: leaveTyp,
+              start_date: form.datum,
+              end_date: form.datum,
+              days: 1,
+              status: "genehmigt",
+              reviewed_by: callerId ?? null,
+              reviewed_at: new Date().toISOString(),
+            });
+          }
+        }
       }
 
       // KFZ-Sync: entferne gelöschte, insert/update die restlichen
