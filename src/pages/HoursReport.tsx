@@ -300,8 +300,18 @@ export default function HoursReport() {
   };
 
   const monthDays = generateMonthDays();
-  // Per-Tag-Aggregation aus dem Helper — Multi-Project-Tage fließen
-  // korrekt zusammen, Minusstunden bleiben erhalten.
+
+  // Stundenkonto-Status aus time_accounts (manuelle Buchungen) +
+  // Live-Auto-Saldo über ALLE time_entries des Mitarbeiters (nicht
+  // nur des aktuellen Monats). Wird im Header-Block angezeigt.
+  const [manualBalance, setManualBalance] = useState<number>(0);
+  const [autoBalanceAll, setAutoBalanceAll] = useState<number>(0);
+  // Ein-/Austrittsdatum: außerhalb davon darf kein Soll und kein Minus entstehen.
+  // WICHTIG: muss VOR monthBalance stehen — die useMemo-Factory läuft schon
+  // beim Rendern, ein späterer const-Deklaration führt zum ReferenceError
+  // ("Hoppla — ein Fehler").
+  const [beschaeftigung, setBeschaeftigung] = useState<{ eintritt?: string | null; austritt?: string | null }>({});
+
   // Monats-Soll KALENDER-basiert (alle Mo-Do ohne Feiertage) — nicht nur über
   // Tage mit Einträgen, sonst schrumpft das Soll um jeden Abwesenheits- und
   // jeden nicht erfassten Tag. Werktage ohne Erfassung erzeugen ein Minus.
@@ -312,13 +322,6 @@ export default function HoursReport() {
   const totalHours = monthBalance.ist;
   const totalSaldo = monthBalance.saldo;
   const totalSoll = monthBalance.soll;
-  // Stundenkonto-Status aus time_accounts (manuelle Buchungen) +
-  // Live-Auto-Saldo über ALLE time_entries des Mitarbeiters (nicht
-  // nur des aktuellen Monats). Wird im Header-Block angezeigt.
-  const [manualBalance, setManualBalance] = useState<number>(0);
-  const [autoBalanceAll, setAutoBalanceAll] = useState<number>(0);
-  // Ein-/Austrittsdatum: außerhalb davon darf kein Soll und kein Minus entstehen.
-  const [beschaeftigung, setBeschaeftigung] = useState<{ eintritt?: string | null; austritt?: string | null }>({});
   useEffect(() => {
     if (!selectedUserId) return;
     let cancelled = false;
