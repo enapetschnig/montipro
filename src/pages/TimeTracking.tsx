@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Clock, Plus, AlertTriangle, CheckCircle2, Calendar, Sun, Trash2, Users } from "lucide-react";
+import { Clock, Plus, CheckCircle2, Calendar, Sun, Trash2, Users } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { MultiEmployeeSelect } from "@/components/MultiEmployeeSelect";
 import { PageHeader } from "@/components/PageHeader";
@@ -183,17 +183,18 @@ const TimeTracking = () => {
       }));
       setExistingDayEntries(entries);
       
-      // If entries exist, suggest next time slot for first block
-      if (entries.length > 0 && !entries.some(e => ["Urlaub", "Krankenstand", "Weiterbildung", "Feiertag", "Zeitausgleich"].includes(e.taetigkeit))) {
-        const lastEntry = entries[entries.length - 1];
-        const [lastEndHours, lastEndMinutes] = lastEntry.end_time.split(':').map(Number);
+      // Startzeit vorschlagen: an der Endzeit des letzten Eintrags anschließen —
+      // auch wenn es eine Abwesenheit ist (halber Zeitausgleich + zusätzlich
+      // gearbeitete Stunden ist ein normaler Fall).
+      const letzterMitEnde = [...entries].reverse().find(e => !!e.end_time);
+      if (letzterMitEnde) {
+        const [lastEndHours, lastEndMinutes] = letzterMitEnde.end_time.split(':').map(Number);
         // Neue Baustelle beginnt direkt an der Endzeit der vorigen (kein
         // automatischer 30-Min-Puffer) — eine Pause nur, wenn manuell gewählt.
         const nextStartMinutes = lastEndHours * 60 + lastEndMinutes;
         const suggestedStart = `${String(Math.floor(nextStartMinutes / 60)).padStart(2, '0')}:${String(nextStartMinutes % 60).padStart(2, '0')}`;
-        
         setTimeBlocks([createDefaultBlock(suggestedStart)]);
-      } else if (!entries.some(e => ["Urlaub", "Krankenstand", "Weiterbildung", "Feiertag", "Zeitausgleich"].includes(e.taetigkeit))) {
+      } else {
         // Auto-fill default work times for the selected date
         const dateObj = new Date(date);
         const defaults = getDefaultWorkTimes(dateObj);
@@ -867,7 +868,11 @@ const TimeTracking = () => {
     setSaving(false);
   };
 
-  const isDayBlocked = existingDayEntries.some(e => ["Urlaub", "Krankenstand", "Weiterbildung", "Feiertag", "Zeitausgleich"].includes(e.taetigkeit));
+  // Tag hat bereits eine Abwesenheit (Urlaub/ZA/…). Das Erfassen zusätzlicher
+  // ARBEITSSTUNDEN bleibt erlaubt — z.B. 8 h Zeitausgleich + 2 h tatsächlich
+  // gearbeitet. Nur eine zweite Abwesenheit wird weiterhin verhindert
+  // (Prüfung in handleAbsenceSubmit).
+  const hatAbwesenheit = existingDayEntries.some(e => ["Urlaub", "Krankenstand", "Weiterbildung", "Feiertag", "Zeitausgleich"].includes(e.taetigkeit));
 
   if (loading) return <div className="p-4">Lädt...</div>;
 
@@ -931,42 +936,40 @@ const TimeTracking = () => {
                   Lade Tageseinträge...
                 </div>
               ) : existingDayEntries.length > 0 ? (
-                <div className={`rounded-lg p-4 space-y-3 ${
-                  isDayBlocked
-                    ? "bg-destructive/10 border border-destructive/30"
-                    : "bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800"
-                }`}>
+                <div className="rounded-lg p-4 space-y-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
                   <div className="flex items-center gap-2 font-medium text-sm">
-                    {isDayBlocked ? (
-                      <>
-                        <AlertTriangle className="w-4 h-4 text-destructive" />
-                        <span className="text-destructive">Tag blockiert ({existingDayEntries[0].taetigkeit})</span>
-                      </>
-                    ) : (
-                      <>
-                        <Calendar className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                        <span className="text-amber-700 dark:text-amber-300">Bereits gebuchte Zeiten</span>
-                      </>
-                    )}
+                    <Calendar className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                    <span className="text-amber-700 dark:text-amber-300">
+                      {hatAbwesenheit
+                        ? `Bereits eingetragen: ${existingDayEntries.find(e => ["Urlaub","Krankenstand","Weiterbildung","Feiertag","Zeitausgleich"].includes(e.taetigkeit))?.taetigkeit}`
+                        : "Bereits gebuchte Zeiten"}
+                    </span>
                   </div>
-                  
-                  {!isDayBlocked && (
-                    <div className="space-y-1.5">
-                      {existingDayEntries.map((entry) => (
-                        <div key={entry.id} className="flex items-center justify-between text-sm bg-background/60 rounded px-2 py-1.5">
-                          <div className="flex items-center gap-2">
+
+                  {hatAbwesenheit && (
+                    <p className="text-xs text-amber-800 dark:text-amber-200">
+                      Zusätzlich tatsächlich gearbeitete Stunden können unten trotzdem
+                      erfasst werden (z.B. halber Zeitausgleich + gearbeitete Stunden).
+                    </p>
+                  )}
+
+                  <div className="space-y-1.5">
+                    {existingDayEntries.map((entry) => (
+                      <div key={entry.id} className="flex items-center justify-between text-sm bg-background/60 rounded px-2 py-1.5">
+                        <div className="flex items-center gap-2">
+                          {entry.start_time && entry.end_time && (
                             <Badge variant="outline" className="font-mono text-xs">
                               {entry.start_time.substring(0, 5)} - {entry.end_time.substring(0, 5)}
                             </Badge>
-                            <span className="truncate max-w-[150px]">
-                              {entry.project_name ? `${entry.project_name}` : entry.taetigkeit}
-                            </span>
-                          </div>
-                          <span className="font-medium">{Number(entry.stunden).toFixed(2)}h</span>
+                          )}
+                          <span className="truncate max-w-[150px]">
+                            {entry.project_name ? `${entry.project_name}` : entry.taetigkeit}
+                          </span>
                         </div>
-                      ))}
-                    </div>
-                  )}
+                        <span className="font-medium">{Number(entry.stunden).toFixed(2)}h</span>
+                      </div>
+                    ))}
+                  </div>
                   
                   <div className="flex items-center justify-between pt-2 border-t border-amber-200 dark:border-amber-700">
                     <span className="text-sm font-medium">Tagessumme</span>
@@ -984,9 +987,9 @@ const TimeTracking = () => {
                 </div>
               )}
 
-              {/* Only show form if day is not blocked */}
-              {!isDayBlocked && (
-                <>
+              {/* Erfassungsformular immer zeigen — auch an Abwesenheitstagen,
+                  damit zusätzlich gearbeitete Stunden nachgetragen werden können. */}
+              <>
 
                   {/* Time Blocks */}
                   <div className="space-y-4">
@@ -1434,8 +1437,7 @@ const TimeTracking = () => {
                   <Button type="submit" className="w-full" disabled={saving}>
                     {saving ? "Wird gespeichert..." : `${timeBlocks.length > 1 ? 'Alle Einträge' : 'Stunden'} erfassen`}
                   </Button>
-                </>
-              )}
+              </>
             </form>
           </CardContent>
         </Card>
