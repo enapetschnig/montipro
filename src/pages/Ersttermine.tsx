@@ -147,11 +147,11 @@ const Ersttermine = () => {
               <CalendarCheck className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
               <h3 className="text-lg font-medium mb-2">Keine Ersttermine gefunden</h3>
               <p className="text-muted-foreground mb-4">
-                {searchQuery || statusFilter !== "alle"
-                  ? "Keine Ersttermine entsprechen Ihren Filterkriterien"
+                {searchQuery
+                  ? "Keine Ersttermine entsprechen Ihrer Suche"
                   : "Erstellen Sie Ihren ersten Ersttermin"}
               </p>
-              {!searchQuery && statusFilter === "alle" && (
+              {!searchQuery && (
                 <Button onClick={() => navigate("/ersttermine/neu")} variant="outline">
                   <Plus className="h-4 w-4 mr-2" />
                   Ersten Ersttermin erfassen

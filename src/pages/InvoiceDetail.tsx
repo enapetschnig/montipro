@@ -1105,17 +1105,18 @@ export default function InvoiceDetail() {
     if (saving) return false;
     setSaving(true);
 
+    // ALLES in try/finally: egal welcher Fehler auftritt (auch ein Programm-
+    // fehler in der Validierung), der Speichern-Button wird IMMER wieder
+    // freigegeben. Vorher lag die Validierung ausserhalb des try — eine
+    // Ausnahme dort ließ `saving` dauerhaft auf true stehen: Button grau,
+    // Klick ohne Wirkung, kein Speichern mehr möglich bis Seiten-Neuladen.
+    try {
+
     if (!form.kunde_name.trim()) {
-      setSaving(false);
       toast({ variant: "destructive", title: "Fehler", description: "Kundenname ist erforderlich" });
       return false;
     }
-    // Validierungs-Abbruch: IMMER auch setSaving(false), sonst bleibt der
-    // Speichern-Button dauerhaft gesperrt (handleSave blockt sich zusätzlich
-    // über `if (saving) return false`) und es lässt sich gar nicht mehr
-    // speichern, bis die Seite neu geladen wird.
     const abbruch = (title: string, description: string) => {
-      setSaving(false);
       toast({ variant: "destructive", title, description });
       return false;
     };
@@ -1173,27 +1174,25 @@ export default function InvoiceDetail() {
     // automatisch auf das Rechnungsdatum (form.datum) — siehe Renderer.
     // Daher hier kein harter Pflicht-Check mehr.
 
-    // Austrian UID requirements
-    if (form.typ === "rechnung" && saveBrutto > 400) {
+    // Österreichische UID-Pflichten. bruttoSumme ist die live berechnete
+    // Gesamtsumme (inkl. Rabatt/Nachlass/mwst_exempt) — die früher hier
+    // benutzte lokale Variable saveBrutto existiert nicht mehr und warf
+    // beim Speichern einen ReferenceError: der Speichern-Button blieb grau
+    // hängen und es ließ sich keine Rechnung mehr ausstellen.
+    if (form.typ === "rechnung" && bruttoSumme > 400) {
       const { data: uidSetting } = await supabase.from("app_settings").select("value").eq("key", "firmen_uid").maybeSingle();
       if (!uidSetting?.value) {
-        toast({ variant: "destructive", title: "UID-Nummer fehlt", description: "Bei Rechnungen über €400 ist die UID-Nummer des Ausstellers gesetzlich vorgeschrieben. Bitte im Admin-Bereich konfigurieren." });
-        setSaving(false);
-        return false;
+        return abbruch("UID-Nummer fehlt", "Bei Rechnungen über €400 ist die UID-Nummer des Ausstellers gesetzlich vorgeschrieben. Bitte im Admin-Bereich konfigurieren.");
       }
     }
-    if (form.typ === "rechnung" && saveBrutto > 10000 && !form.kunde_uid?.trim()) {
-      toast({ variant: "destructive", title: "Kunden-UID fehlt", description: "Bei Rechnungen über €10.000 ist die UID-Nummer des Empfängers gesetzlich vorgeschrieben." });
-      setSaving(false);
-      return false;
+    if (form.typ === "rechnung" && bruttoSumme > 10000 && !form.kunde_uid?.trim()) {
+      return abbruch("Kunden-UID fehlt", "Bei Rechnungen über €10.000 ist die UID-Nummer des Empfängers gesetzlich vorgeschrieben.");
     }
 
-    // setSaving(true) bereits am Anfang gesetzt — kein erneuter Aufruf nötig
+    // setSaving wird zentral im finally zurückgesetzt.
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-      toast({ variant: "destructive", title: "Fehler", description: "Nicht angemeldet" });
-      setSaving(false);
-      return false;
+      return abbruch("Fehler", "Nicht angemeldet");
     }
 
     try {
@@ -1473,13 +1472,16 @@ export default function InvoiceDetail() {
         window.history.replaceState(null, "", `/invoices/${savedId}`);
       }
 
-      setSaving(false);
       return true;
     } catch (err: any) {
       console.error("Fehler beim Speichern:", err);
       toast({ variant: "destructive", title: "Fehler", description: err.message || "Speichern fehlgeschlagen" });
-      setSaving(false);
       return false;
+    }
+
+    } finally {
+      // Button in JEDEM Fall wieder freigeben — auch bei unerwarteten Fehlern.
+      setSaving(false);
     }
   };
 
