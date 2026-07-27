@@ -225,21 +225,27 @@ export function aggregateMonth(
 
 /**
  * Saldo-Summe über die gegebenen Einträge — nur Tage MIT Einträgen.
- * Achtung: kennt keine fehlenden Werktage. Für das angezeigte Stundenkonto
- * stattdessen totalAutoSaldoKalender verwenden (konsistent mit Saldo Monat).
+ * DAS ist die Basis des angezeigten Stundenkontos ("Auto").
+ *
+ * Bewusst nicht kalenderbasiert: die Zeiterfassung begann für Bestands-
+ * mitarbeiter erst mit der App-Einführung — ein Kalender-Konto würde jeden
+ * nie erfassten Alt-Werktag seit Eintritt als Minus zählen (bei 20 Dienst-
+ * jahren zigtausende Stunden, live gegengerechnet). Fehlende Werktage des
+ * angezeigten Monats macht stattdessen aggregateMonth ("Saldo Monat" +
+ * "X Werktage ohne Erfassung") sichtbar.
  */
 export function totalAutoSaldo(entries: TimeEntryLite[], holidaySet?: Set<string>): number {
   return aggregateByDay(entries, holidaySet).reduce((s, d) => s + d.saldo, 0);
 }
 
 /**
- * KALENDER-basierter Auto-Saldo über die gesamte Historie: Summe der
- * Monats-Salden von (Eintritt bzw. erstem Eintrag) bis heute.
+ * KALENDER-basierter Auto-Saldo: Summe der Monats-Salden von (Eintritt bzw.
+ * erstem Eintrag) bis heute — fehlende Werktage zählen als Minus.
  *
- * Damit gilt: Auto-Saldo = Summe aller "Saldo Monat"-Werte — die Zahlen
- * lassen sich gegenseitig nachrechnen. totalAutoSaldo (nur Tage mit
- * Einträgen) ignorierte fehlende Werktage, die im Monats-Saldo sehr wohl
- * als Minus erschienen: Stundenkonto und Monatsansicht widersprachen sich.
+ * AKTUELL NICHT IM UI VERWENDET (siehe totalAutoSaldo): sinnvoll erst mit
+ * einem konfigurierten "Zeiterfassungs-Beginn" pro Mitarbeiter, sonst
+ * entstehen für Bestandsmitarbeiter absurde Rückstände. Getestet und
+ * bereit für diesen Fall.
  */
 export function totalAutoSaldoKalender(
   entries: TimeEntryLite[],

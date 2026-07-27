@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Clock, Building2, Hammer, Pencil, Trash2, TrendingUp, Wallet } from "lucide-react";
 import { getTotalWorkingHours } from "@/lib/workingHours";
-import { aggregateByDay, aggregateMonth, totalAutoSaldoKalender, formatSaldo, ortAnzeigeAusblenden, istZeitausgleich } from "@/lib/hoursAccounting";
+import { aggregateByDay, aggregateMonth, totalAutoSaldo, formatSaldo, ortAnzeigeAusblenden, istZeitausgleich } from "@/lib/hoursAccounting";
 import { useAustrianHolidays } from "@/hooks/useAustrianHolidays";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -75,9 +75,12 @@ const MyHours = () => {
       if (cancelled) return;
       const besch = { eintritt: (emp as any)?.eintritt_datum ?? null, austritt: (emp as any)?.austritt_datum ?? null };
       setManualSaldo(Number((acc as any)?.balance_hours) || 0);
-      // Kalenderbasiert — konsistent mit "Saldo Monat" (fehlende Werktage
-      // zählen in beiden als Minus, die Zahlen sind gegenseitig nachrechenbar).
-      setAutoSaldoAll(totalAutoSaldoKalender((allEntries as any[]) || [], holidaySet, new Date(), besch));
+      // Buchungsbasiert (nur Tage MIT Einträgen). Bewusst NICHT kalenderbasiert:
+      // die Zeiterfassung begann für Bestandsmitarbeiter erst mit der App —
+      // ein Kalender-Konto würde jeden nie erfassten Alt-Werktag als Minus
+      // zählen (bei 20 Dienstjahren zehntausende Stunden). Fehlende Tage des
+      // ANGEZEIGTEN Monats macht der "Saldo Monat" daneben sichtbar.
+      setAutoSaldoAll(totalAutoSaldo((allEntries as any[]) || [], holidaySet));
       setBeschaeftigung(besch);
     })();
     return () => { cancelled = true; };
@@ -131,7 +134,7 @@ const MyHours = () => {
       supabase.from("time_entries").select("datum, stunden, taetigkeit").eq("user_id", user.id),
     ]);
     setManualSaldo(Number((acc as any)?.balance_hours) || 0);
-    setAutoSaldoAll(totalAutoSaldoKalender((allEntries as any[]) || [], holidaySet, new Date(), beschaeftigung));
+    setAutoSaldoAll(totalAutoSaldo((allEntries as any[]) || [], holidaySet));
   };
 
   const handleUpdateEntry = async () => {

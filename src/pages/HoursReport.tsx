@@ -27,7 +27,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { getNormalWorkingHours } from "@/lib/workingHours";
-import { aggregateByDay, aggregateMonth, totalAutoSaldoKalender, formatSaldo, type DayBalance, ortAnzeigeAusblenden, istZeitausgleich } from "@/lib/hoursAccounting";
+import { aggregateByDay, aggregateMonth, totalAutoSaldo, formatSaldo, type DayBalance, ortAnzeigeAusblenden, istZeitausgleich } from "@/lib/hoursAccounting";
 import { useAustrianHolidays } from "@/hooks/useAustrianHolidays";
 
 interface TimeEntry {
@@ -337,10 +337,10 @@ export default function HoursReport() {
       if (cancelled) return;
       const besch = { eintritt: (emp as any)?.eintritt_datum ?? null, austritt: (emp as any)?.austritt_datum ?? null };
       setManualBalance(Number((acc as any)?.balance_hours) || 0);
-      // Kalenderbasiert: Auto-Saldo = Summe aller Monats-Salden — damit
-      // stimmen Stundenkonto und "Saldo Monat" überein und sind gegenseitig
-      // nachrechenbar (fehlende Werktage zählen in beiden als Minus).
-      setAutoBalanceAll(totalAutoSaldoKalender((allEntries as any[]) || [], holidaySet, new Date(), besch));
+      // Buchungsbasiert (nur Tage MIT Einträgen) — siehe Kommentar in
+      // MyHours: kalenderbasiert würde jeden nie erfassten Alt-Werktag seit
+      // Eintritt als Minus zählen (Bestandsmitarbeiter → absurde Werte).
+      setAutoBalanceAll(totalAutoSaldo((allEntries as any[]) || [], holidaySet));
       setBeschaeftigung(besch);
     })();
     return () => { cancelled = true; };

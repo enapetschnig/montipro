@@ -23,7 +23,7 @@ import {
   getWeeklyTargetHours,
   getTotalWorkingHours
 } from "@/lib/workingHours";
-import { totalAutoSaldoKalender } from "@/lib/hoursAccounting";
+import { totalAutoSaldo } from "@/lib/hoursAccounting";
 import { useAustrianHolidays } from "@/hooks/useAustrianHolidays";
 
 type Project = {
@@ -539,9 +539,6 @@ const TimeTracking = () => {
           .select("datum, stunden, taetigkeit")
           .eq("user_id", user.id),
       ]);
-      const { data: empRow } = await (supabase.from("employees" as never) as any)
-        .select("eintritt_datum, austritt_datum").eq("user_id", user.id).maybeSingle();
-
       // Fetch-Fehler NICHT als "0 Stunden verfügbar" fehlinterpretieren —
       // sonst erscheint bei einem Netzwerk-Schluckauf fälschlich
       // "Nicht genügend Plusstunden".
@@ -552,12 +549,9 @@ const TimeTracking = () => {
       }
 
       const balanceBefore = Number(timeAccount?.balance_hours) || 0;
-      // Kalenderbasiert — exakt dieselbe Zahl, die "Meine Stunden" als
+      // Buchungsbasiert — exakt dieselbe Zahl, die "Meine Stunden" als
       // effektiven Saldo anzeigt (sonst widersprechen sich Anzeige und Check).
-      const autoSaldo = totalAutoSaldoKalender((allEntries as any[]) || [], holidaySet, new Date(), {
-        eintritt: (empRow as any)?.eintritt_datum ?? null,
-        austritt: (empRow as any)?.austritt_datum ?? null,
-      });
+      const autoSaldo = totalAutoSaldo((allEntries as any[]) || [], holidaySet);
       const effektiv = autoSaldo + balanceBefore;
 
       if (effektiv < workingHours) {
@@ -614,6 +608,25 @@ const TimeTracking = () => {
     });
 
     if (!error) {
+      // Plantafel-Block anlegen (falls für den Tag noch keiner existiert) —
+      // der Selbstservice war der letzte Pfad, der das nicht tat: die
+      // Abwesenheit stand in der Zeiterfassung, fehlte aber auf der Plantafel.
+      const { data: vorhandenerBlock } = await (supabase.from("leave_requests" as never) as any)
+        .select("id").eq("user_id", user.id).eq("type", absenceData.type)
+        .lte("start_date", absenceData.date).gte("end_date", absenceData.date).maybeSingle();
+      if (!vorhandenerBlock) {
+        await (supabase.from("leave_requests" as never) as any).insert({
+          user_id: user.id,
+          type: absenceData.type,
+          start_date: absenceData.date,
+          end_date: absenceData.date,
+          days: 1,
+          status: "genehmigt",
+          reviewed_by: user.id,
+          reviewed_at: new Date().toISOString(),
+        });
+      }
+
       toast({ title: "Erfolg", description: `${absenceLabel} erfasst` });
       setShowAbsenceDialog(false);
       setAbsenceData({
