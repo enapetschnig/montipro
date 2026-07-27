@@ -538,21 +538,8 @@ export default function Invoices() {
 
   const storniertCount = invoices.filter(i => i.status === "storniert").length;
 
-  const totalRechnungen = invoices.filter(i => INVOICE_LIKE_TYPES.has(i.typ) && i.status !== "storniert").length;
-  const totalAngebote = invoices.filter(i => ANGEBOT_LIKE_TYPES.has(i.typ) && i.status !== "storniert").length;
-  // Offen: nur echte Forderungen (keine Gutschriften — die sind aus
-  // unserer Sicht "wir schulden dem Kunden", also negative Forderung).
-  const offeneSumme = invoices
-    .filter(i => PAYABLE_INVOICE_TYPES.has(i.typ) && (i.status === "offen" || i.status === "teilbezahlt"))
-    .reduce((sum, i) => sum + Number(i.brutto_summe) - i.bezahlt_betrag, 0);
-  // Bezahlt = vereinnahmt minus an Kunden zurückerstattete Gutschriften.
-  const bezahltEingenommen = invoices
-    .filter(i => PAYABLE_INVOICE_TYPES.has(i.typ) && (i.status === "bezahlt" || i.status === "teilbezahlt"))
-    .reduce((sum, i) => sum + i.bezahlt_betrag, 0);
-  const verrechnete_gutschriften = invoices
-    .filter(i => i.typ === "gutschrift" && i.status === "verrechnet")
-    .reduce((sum, i) => sum + Number(i.brutto_summe), 0);
-  const bezahlteSumme = bezahltEingenommen - verrechnete_gutschriften;
+  // (Frühere Summen-Berechnungen hier waren toter Code — die Statistik-Karten
+  // rechnen in ihrem eigenen IIFE über visibleInvoices.)
 
   // Status options for the filter depend on selected typ
   const statusFilterOptions = filterTyp === "rechnung"
@@ -597,6 +584,10 @@ export default function Invoices() {
           // mitgezählt (unabhängig vom Status).
           const visibleInvoices = invoices.filter(i => {
             if (i.status === "storniert") return false;
+            // Archivierte ausblenden — wie die Liste darunter (matchArchive).
+            // Sonst zählen archivierte Belege im "Offenen Betrag" mit, obwohl
+            // sie in der Liste gar nicht zu sehen sind.
+            if (i.archiviert && !showArchive) return false;
             if (filterTyp === "rechnung") {
               if (!INVOICE_LIKE_TYPES.has(i.typ)) return false;
               return filterSubTyp === "alle" || i.typ === filterSubTyp;

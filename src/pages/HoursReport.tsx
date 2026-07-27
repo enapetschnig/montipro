@@ -27,7 +27,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { getNormalWorkingHours } from "@/lib/workingHours";
-import { aggregateByDay, aggregateMonth, totalAutoSaldo, formatSaldo, type DayBalance, ortAnzeigeAusblenden, SONDER_TAETIGKEITEN, ZEITAUSGLEICH_TAETIGKEIT } from "@/lib/hoursAccounting";
+import { aggregateByDay, aggregateMonth, totalAutoSaldoKalender, formatSaldo, type DayBalance, ortAnzeigeAusblenden, istZeitausgleich } from "@/lib/hoursAccounting";
 import { useAustrianHolidays } from "@/hooks/useAustrianHolidays";
 
 interface TimeEntry {
@@ -335,9 +335,13 @@ export default function HoursReport() {
           .select("eintritt_datum, austritt_datum").eq("user_id", selectedUserId).maybeSingle(),
       ]);
       if (cancelled) return;
+      const besch = { eintritt: (emp as any)?.eintritt_datum ?? null, austritt: (emp as any)?.austritt_datum ?? null };
       setManualBalance(Number((acc as any)?.balance_hours) || 0);
-      setAutoBalanceAll(totalAutoSaldo((allEntries as any[]) || [], holidaySet));
-      setBeschaeftigung({ eintritt: (emp as any)?.eintritt_datum ?? null, austritt: (emp as any)?.austritt_datum ?? null });
+      // Kalenderbasiert: Auto-Saldo = Summe aller Monats-Salden — damit
+      // stimmen Stundenkonto und "Saldo Monat" überein und sind gegenseitig
+      // nachrechenbar (fehlende Werktage zählen in beiden als Minus).
+      setAutoBalanceAll(totalAutoSaldoKalender((allEntries as any[]) || [], holidaySet, new Date(), besch));
+      setBeschaeftigung(besch);
     })();
     return () => { cancelled = true; };
     // holidaySet als Dependency: der Hook lädt asynchron — ohne sie bliebe
@@ -549,7 +553,9 @@ export default function HoursReport() {
     if (includeOvertime) {
       worksheetData.push(["", "Hiermit bestätige ich die Richtigkeit der von mir angegebenen Überstunden.", "", "", "", "", "", "", "", "", "", ""]);
       worksheetData.push(["", "", "", "", "", "", "", "", "", "", "", ""]); // Leer
-      worksheetData.push(["", `Derzeitiger offener Überstundenstand: ${formatSaldo(totalSaldo)}`, "", "", "", "", "", "", "", "", "", ""]);
+      // Der "offene Überstundenstand" ist der Stand des STUNDENKONTOS
+      // (Auto gesamt + Manuell) — nicht der Saldo nur dieses Monats.
+      worksheetData.push(["", `Derzeitiger offener Überstundenstand: ${formatSaldo(autoBalanceAll + manualBalance)}`, "", "", "", "", "", "", "", "", "", ""]);
       worksheetData.push(["", "Restliche Überstunden wurden zur Gänze abgegolten.", "", "", "", "", "", "", "", "", "", ""]);
     } else {
       worksheetData.push(["", "", "", "", "", "", "", "", "", "", "", ""]); // Leer statt Überstunden-Text
@@ -934,7 +940,7 @@ export default function HoursReport() {
                               // Feiertag, Weiterbildung) die Tätigkeit als "Projekt"
                               // zeigen — sonst bleibt die Spalte leer und der Tag
                               // sieht aus wie ein normaler Arbeitstag.
-                              const isZeitausgleich = entry.taetigkeit === ZEITAUSGLEICH_TAETIGKEIT;
+                              const isZeitausgleich = istZeitausgleich(entry.taetigkeit);
                               const projektName = isSonderzeit
                                 ? entry.taetigkeit
                                 : (project?.name || "");
@@ -1003,7 +1009,12 @@ export default function HoursReport() {
                                     </span>
                                   </TableCell>
                                   <TableCell className="max-w-[150px] truncate">
-                                    {projektName}
+                                    {/* Wie in "Meine Stunden": Abwesenheiten hervorheben, ZA rot. */}
+                                    {isSonderzeit ? (
+                                      <span className={isZeitausgleich ? "font-medium text-red-600" : "font-medium text-muted-foreground"}>
+                                        {projektName}
+                                      </span>
+                                    ) : projektName}
                                   </TableCell>
                                   <TableCell className="max-w-[200px]">
                                     <div className="flex items-start gap-1.5 flex-wrap">

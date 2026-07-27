@@ -12,7 +12,7 @@
 //   ZA     = im Auto-Saldo neutral (Abzug läuft einmalig übers Zeitkonto)
 
 import { describe, it, expect } from "vitest";
-import { aggregateByDay, aggregateMonth, totalAutoSaldo, formatSaldo } from "./hoursAccounting";
+import { aggregateByDay, aggregateMonth, totalAutoSaldo, totalAutoSaldoKalender, formatSaldo, istZeitausgleich, ortAnzeigeAusblenden } from "./hoursAccounting";
 
 const e = (datum: string, stunden: number, taetigkeit?: string) => ({ datum, stunden, taetigkeit });
 
@@ -223,6 +223,67 @@ describe("Zeitausgleich zählt genau einmal", () => {
     const ohneZA = totalAutoSaldo([e("2026-07-14", 10)]);
     const mitZA = totalAutoSaldo([e("2026-07-14", 10), e("2026-07-13", 10, "Zeitausgleich")]);
     expect(mitZA).toBe(ohneZA);
+  });
+});
+
+describe("Abwesenheit erzeugt kein Gratis-Plus", () => {
+  it("ZA am arbeitsfreien Freitag zählt NICHT als Plus (würde sonst doppelt profitieren)", () => {
+    // Freitag: Soll 0. Die 10 ZA-Stunden werden vom Zeitkonto abgebucht —
+    // ein +10 im Auto-Saldo wäre ein geschenkter Ausgleich.
+    const [d] = aggregateByDay([e("2026-07-03", 10, "Zeitausgleich")]); // Freitag
+    expect(d.saldo).toBe(0);
+  });
+
+  it("Urlaub über dem Tagessoll erzeugt kein Plus (nur echte Arbeit zählt)", () => {
+    const [d] = aggregateByDay([e("2026-07-14", 12, "Urlaub")]); // Di, Soll 10
+    expect(d.saldo).toBe(0);
+  });
+
+  it("Mischtag: Abwesenheit deckt das Soll, Arbeitsstunden zählen voll als Plus", () => {
+    const [d] = aggregateByDay([e("2026-07-14", 10, "Urlaub"), e("2026-07-14", 4)]);
+    expect(d.saldo).toBe(4);
+  });
+});
+
+describe("totalAutoSaldoKalender", () => {
+  const heute = new Date(2026, 6, 21);
+
+  it("zählt fehlende Werktage als Minus — konsistent mit Saldo Monat", () => {
+    // Nur ein Eintrag am Mo 13.07. (10h) → Di–Do 14.–16. + Mo 20.07. fehlen
+    const entries = [e("2026-07-13", 10)];
+    const saldo = totalAutoSaldoKalender(entries, undefined, heute);
+    // Start = erster Eintrag 13.07.; bis gestern (20.07.): 13(0) −14 −15 −16 −20 = −40
+    expect(saldo).toBe(-40);
+  });
+
+  it("ohne Eintrittsdatum zählen Tage vor dem ersten Eintrag nicht", () => {
+    const entries = [e("2026-07-20", 10)];
+    const saldo = totalAutoSaldoKalender(entries, undefined, heute);
+    expect(saldo).toBe(0); // 20.07. erfüllt, davor nichts angerechnet
+  });
+
+  it("Austritt beendet die Zählung", () => {
+    const entries = [e("2026-06-02", 10)];
+    const saldo = totalAutoSaldoKalender(entries, undefined, heute, { eintritt: "2026-06-02", austritt: "2026-06-02" });
+    expect(saldo).toBe(0);
+  });
+
+  it("ohne Einträge und ohne Eintritt: 0", () => {
+    expect(totalAutoSaldoKalender([], undefined, heute)).toBe(0);
+  });
+});
+
+describe("trim-sichere Erkennung", () => {
+  it("istZeitausgleich erkennt Leerzeichen-Varianten", () => {
+    expect(istZeitausgleich("Zeitausgleich")).toBe(true);
+    expect(istZeitausgleich(" Zeitausgleich ")).toBe(true);
+    expect(istZeitausgleich("Urlaub")).toBe(false);
+    expect(istZeitausgleich(null)).toBe(false);
+  });
+
+  it("ortAnzeigeAusblenden trimmt", () => {
+    expect(ortAnzeigeAusblenden(" Urlaub ")).toBe(true);
+    expect(ortAnzeigeAusblenden("Montage")).toBe(false);
   });
 });
 

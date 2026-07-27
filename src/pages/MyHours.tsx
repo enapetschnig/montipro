@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Clock, Building2, Hammer, Pencil, Trash2, TrendingUp, Wallet } from "lucide-react";
 import { getTotalWorkingHours } from "@/lib/workingHours";
-import { aggregateByDay, aggregateMonth, totalAutoSaldo, formatSaldo, ortAnzeigeAusblenden, ZEITAUSGLEICH_TAETIGKEIT } from "@/lib/hoursAccounting";
+import { aggregateByDay, aggregateMonth, totalAutoSaldoKalender, formatSaldo, ortAnzeigeAusblenden, istZeitausgleich } from "@/lib/hoursAccounting";
 import { useAustrianHolidays } from "@/hooks/useAustrianHolidays";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -73,9 +73,12 @@ const MyHours = () => {
           .select("eintritt_datum, austritt_datum").eq("user_id", user.id).maybeSingle(),
       ]);
       if (cancelled) return;
+      const besch = { eintritt: (emp as any)?.eintritt_datum ?? null, austritt: (emp as any)?.austritt_datum ?? null };
       setManualSaldo(Number((acc as any)?.balance_hours) || 0);
-      setAutoSaldoAll(totalAutoSaldo((allEntries as any[]) || [], holidaySet));
-      setBeschaeftigung({ eintritt: (emp as any)?.eintritt_datum ?? null, austritt: (emp as any)?.austritt_datum ?? null });
+      // Kalenderbasiert — konsistent mit "Saldo Monat" (fehlende Werktage
+      // zählen in beiden als Minus, die Zahlen sind gegenseitig nachrechenbar).
+      setAutoSaldoAll(totalAutoSaldoKalender((allEntries as any[]) || [], holidaySet, new Date(), besch));
+      setBeschaeftigung(besch);
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -128,7 +131,7 @@ const MyHours = () => {
       supabase.from("time_entries").select("datum, stunden, taetigkeit").eq("user_id", user.id),
     ]);
     setManualSaldo(Number((acc as any)?.balance_hours) || 0);
-    setAutoSaldoAll(totalAutoSaldo((allEntries as any[]) || [], holidaySet));
+    setAutoSaldoAll(totalAutoSaldoKalender((allEntries as any[]) || [], holidaySet, new Date(), beschaeftigung));
   };
 
   const handleUpdateEntry = async () => {
@@ -426,7 +429,7 @@ const MyHours = () => {
                                   Projekt-Spalte — sonst sieht der Tag aus wie normale Arbeit. */}
                               <TableCell className="text-sm">
                                 {ortAnzeigeAusblenden(entry.taetigkeit) ? (
-                                  <span className={entry.taetigkeit?.trim() === ZEITAUSGLEICH_TAETIGKEIT
+                                  <span className={istZeitausgleich(entry.taetigkeit)
                                     ? "font-medium text-red-600"
                                     : "font-medium text-muted-foreground"}>
                                     {entry.taetigkeit}
@@ -444,7 +447,7 @@ const MyHours = () => {
                               <TableCell className="text-right font-semibold">
                                 {entry.stunden.toFixed(2)} h
                                 {/* ZA zehrt vom Zeitkonto → als Minus kennzeichnen. */}
-                                {entry.taetigkeit === ZEITAUSGLEICH_TAETIGKEIT && (
+                                {istZeitausgleich(entry.taetigkeit) && (
                                   <div className="text-[10px] text-red-600 font-semibold mt-0.5 whitespace-nowrap">
                                     −{entry.stunden.toFixed(2)} h Zeitkonto
                                   </div>
@@ -487,7 +490,9 @@ const MyHours = () => {
                   </TableBody>
                   <TableFooter>
                     <TableRow>
-                      <TableCell colSpan={6} className="text-right font-semibold">Gesamt:</TableCell>
+                      {/* Summe der ANGEZEIGTEN Einträge — kann vom Header-"Ist"
+                          abweichen (der zählt im laufenden Monat nur bis gestern). */}
+                      <TableCell colSpan={6} className="text-right font-semibold">Summe aller Einträge:</TableCell>
                       <TableCell className="text-right font-bold">{totalHours.toFixed(2)} h</TableCell>
                       <TableCell colSpan={2}></TableCell>
                     </TableRow>

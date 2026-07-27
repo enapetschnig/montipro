@@ -79,9 +79,15 @@ export default function Employees() {
   }, []);
 
   const fetchDeletedArchive = async () => {
-    const { data } = await (supabase.from("deleted_users_archive" as never) as any)
+    const { data, error } = await (supabase.from("deleted_users_archive" as never) as any)
       .select("id, vorname, nachname, email, telefon, austritt_datum, rolle, deleted_at, notiz")
       .order("deleted_at", { ascending: false });
+    if (error) {
+      // Fehler sichtbar machen — sonst verschwindet der Reiter "Früher
+      // gelöscht" still und ist von "keine Einträge" nicht unterscheidbar.
+      toast({ title: "Fehler", description: `Archiv gelöschter Mitarbeiter konnte nicht geladen werden: ${error.message}`, variant: "destructive" });
+      return;
+    }
     setDeletedArchive(((data as DeletedArchiveRow[]) || []));
   };
 
@@ -106,11 +112,16 @@ export default function Employees() {
 
   const fetchEmployees = async () => {
     setLoading(true);
-    const [{ data, error }, { data: hiddenProfs }] = await Promise.all([
+    const [{ data, error }, { data: hiddenProfs, error: hiddenErr }] = await Promise.all([
       supabase.from("employees").select("*").order("nachname"),
       (supabase.from("profiles" as never) as any).select("id").eq("hidden", true),
     ]);
 
+    if (hiddenErr) {
+      // Nicht fatal: ohne die hidden-Liste erscheinen versteckte AKTIVE
+      // Konten (Demo-Accounts) im Aktiv-Reiter — Hinweis statt stillem Leck.
+      toast({ title: "Hinweis", description: "Versteckte Konten konnten nicht geladen werden — die Liste zeigt evtl. interne Accounts." });
+    }
     if (error) {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
     } else {

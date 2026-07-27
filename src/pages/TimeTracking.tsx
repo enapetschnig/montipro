@@ -23,7 +23,7 @@ import {
   getWeeklyTargetHours,
   getTotalWorkingHours
 } from "@/lib/workingHours";
-import { totalAutoSaldo } from "@/lib/hoursAccounting";
+import { totalAutoSaldoKalender } from "@/lib/hoursAccounting";
 import { useAustrianHolidays } from "@/hooks/useAustrianHolidays";
 
 type Project = {
@@ -539,6 +539,8 @@ const TimeTracking = () => {
           .select("datum, stunden, taetigkeit")
           .eq("user_id", user.id),
       ]);
+      const { data: empRow } = await (supabase.from("employees" as never) as any)
+        .select("eintritt_datum, austritt_datum").eq("user_id", user.id).maybeSingle();
 
       // Fetch-Fehler NICHT als "0 Stunden verfügbar" fehlinterpretieren —
       // sonst erscheint bei einem Netzwerk-Schluckauf fälschlich
@@ -550,7 +552,12 @@ const TimeTracking = () => {
       }
 
       const balanceBefore = Number(timeAccount?.balance_hours) || 0;
-      const autoSaldo = totalAutoSaldo((allEntries as any[]) || [], holidaySet);
+      // Kalenderbasiert — exakt dieselbe Zahl, die "Meine Stunden" als
+      // effektiven Saldo anzeigt (sonst widersprechen sich Anzeige und Check).
+      const autoSaldo = totalAutoSaldoKalender((allEntries as any[]) || [], holidaySet, new Date(), {
+        eintritt: (empRow as any)?.eintritt_datum ?? null,
+        austritt: (empRow as any)?.austritt_datum ?? null,
+      });
       const effektiv = autoSaldo + balanceBefore;
 
       if (effektiv < workingHours) {

@@ -1479,6 +1479,13 @@ export default function InvoiceDetail() {
       return false;
     }
 
+    } catch (err: any) {
+      // Fängt Programmfehler in der VALIDIERUNGS-Strecke (vor dem inneren
+      // try) ab — z.B. den saveBrutto-ReferenceError vom 24.07. Ohne diesen
+      // catch gäbe es keinen Fehler-Toast und die Rejection liefe unbehandelt.
+      console.error("Fehler in der Speicher-Validierung:", err);
+      toast({ variant: "destructive", title: "Fehler", description: err?.message || "Speichern fehlgeschlagen" });
+      return false;
     } finally {
       // Button in JEDEM Fall wieder freigeben — auch bei unerwarteten Fehlern.
       setSaving(false);

@@ -53,7 +53,15 @@ export const ZEITAUSGLEICH_TAETIGKEIT = "Zeitausgleich";
  */
 export function ortAnzeigeAusblenden(taetigkeit: string | null | undefined): boolean {
   if (!taetigkeit) return false;
-  return SONDER_TAETIGKEITEN.has(taetigkeit) || taetigkeit === ZEITAUSGLEICH_TAETIGKEIT;
+  // trim(): taetigkeit ist an mehreren Stellen ein freies Textfeld —
+  // " Zeitausgleich " muss genauso erkannt werden wie "Zeitausgleich".
+  const t = taetigkeit.trim();
+  return SONDER_TAETIGKEITEN.has(t) || t === ZEITAUSGLEICH_TAETIGKEIT;
+}
+
+/** Zentraler ZA-Check — trim-sicher, für alle Anzeige-Stellen. */
+export function istZeitausgleich(taetigkeit: string | null | undefined): boolean {
+  return (taetigkeit ?? "").trim() === ZEITAUSGLEICH_TAETIGKEIT;
 }
 
 /**
@@ -94,12 +102,19 @@ export function aggregateByDay(entries: TimeEntryLite[], holidaySet?: Set<string
       // Früher wurde soll=0 gesetzt — dadurch schrumpfte das Monats-Soll um
       // jeden Abwesenheitstag (Juni 2026: 160 statt 180 h, Feedback 21.07.2026).
       //
-      // Math.max(0, …): Wird an so einem Tag ZUSÄTZLICH gearbeitet (halber
-      // Urlaub + halber Arbeitstag, Arbeit am Feiertag, Mischtag), zählen die
-      // Mehrstunden als Plus. Ein Minus kann nie entstehen — die Abwesenheit
-      // deckt das Tagessoll ab, auch wenn weniger Stunden gebucht sind.
+      // ABWESENHEITS-Stunden zählen höchstens bis zum Tagessoll — sie können
+      // das Soll erfüllen, aber nie ein Plus erzeugen (sonst brächte z.B. ein
+      // Zeitausgleich am arbeitsfreien Freitag +10 in den Auto-Saldo, während
+      // dieselben 10 h vom Zeitkonto abgebucht werden = Gratis-Stunden).
+      // Echte ARBEITS-Stunden am selben Tag (Mischtag, Arbeit am Feiertag)
+      // zählen dagegen voll — was über das Soll hinausgeht, ist Plus.
+      // Ein Minus kann nie entstehen: die Abwesenheit deckt das Soll ab.
+      const sonderIst = dayEntries.reduce((s, e) =>
+        (!!e.taetigkeit && SONDER_TAETIGKEITEN.has(e.taetigkeit.trim()))
+          ? s + Number(e.stunden || 0) : s, 0);
+      const arbeitIst = ist - sonderIst;
       soll = getNormalWorkingHours(new Date(datum + "T12:00:00"));
-      saldo = Math.max(0, ist - soll);
+      saldo = Math.max(0, Math.min(sonderIst, soll) + arbeitIst - soll);
     } else {
       soll = getNormalWorkingHours(new Date(datum + "T12:00:00"), holidaySet);
       saldo = ist - soll;
@@ -208,9 +223,54 @@ export function aggregateMonth(
   return { ist, soll, saldo, fehlendeWerktage, bisHeute: isCurrentMonth, zukunft: isFutureMonth };
 }
 
-/** Saldo-Summe über die gegebenen Einträge — Auto-Saldo aus time_entries. */
+/**
+ * Saldo-Summe über die gegebenen Einträge — nur Tage MIT Einträgen.
+ * Achtung: kennt keine fehlenden Werktage. Für das angezeigte Stundenkonto
+ * stattdessen totalAutoSaldoKalender verwenden (konsistent mit Saldo Monat).
+ */
 export function totalAutoSaldo(entries: TimeEntryLite[], holidaySet?: Set<string>): number {
   return aggregateByDay(entries, holidaySet).reduce((s, d) => s + d.saldo, 0);
+}
+
+/**
+ * KALENDER-basierter Auto-Saldo über die gesamte Historie: Summe der
+ * Monats-Salden von (Eintritt bzw. erstem Eintrag) bis heute.
+ *
+ * Damit gilt: Auto-Saldo = Summe aller "Saldo Monat"-Werte — die Zahlen
+ * lassen sich gegenseitig nachrechnen. totalAutoSaldo (nur Tage mit
+ * Einträgen) ignorierte fehlende Werktage, die im Monats-Saldo sehr wohl
+ * als Minus erschienen: Stundenkonto und Monatsansicht widersprachen sich.
+ */
+export function totalAutoSaldoKalender(
+  entries: TimeEntryLite[],
+  holidaySet?: Set<string>,
+  today: Date = new Date(),
+  beschaeftigung?: { eintritt?: string | null; austritt?: string | null },
+): number {
+  const daten = entries.map(e => e?.datum).filter(Boolean).sort();
+  // Start: Eintrittsdatum, sonst erster Eintrag. Ohne beides gibt es nichts zu rechnen.
+  const startStr = beschaeftigung?.eintritt || daten[0];
+  if (!startStr) return 0;
+  const start = new Date(startStr + "T12:00:00");
+  if (isNaN(start.getTime())) return 0;
+
+  // Ohne hinterlegtes Eintrittsdatum gilt der erste Eintrag als Eintritt —
+  // sonst würden die Werktage davor (im ersten Monat) als fehlend zählen.
+  const effektiveBeschaeftigung = {
+    eintritt: beschaeftigung?.eintritt || daten[0],
+    austritt: beschaeftigung?.austritt ?? null,
+  };
+
+  let sum = 0;
+  let y = start.getFullYear();
+  let m = start.getMonth() + 1;
+  const endOrd = today.getFullYear() * 12 + today.getMonth();
+  while (y * 12 + (m - 1) <= endOrd) {
+    sum += aggregateMonth(entries, y, m, holidaySet, today, effektiveBeschaeftigung).saldo;
+    m++;
+    if (m > 12) { m = 1; y++; }
+  }
+  return sum;
 }
 
 /**
