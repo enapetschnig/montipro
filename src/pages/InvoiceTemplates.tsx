@@ -204,6 +204,11 @@ export default function InvoiceTemplates() {
 
   const openEdit = async (t: Template) => {
     setEditId(t.id);
+    // Komponenten-State sofort leeren (Dialog öffnet vor dem await der
+    // Set-Query) — verhindert, dass Reste des zuvor geöffneten Materials
+    // beim schnellen Speichern in dieses Material geschrieben werden.
+    setSetComponents([]);
+    setOriginalComponentIds([]);
     setForm({
       name: t.name, beschreibung: t.beschreibung, einheit: t.einheit, einzelpreis: t.einzelpreis,
       kategorie: t.kategorie, art: t.art || "",
@@ -256,11 +261,16 @@ export default function InvoiceTemplates() {
   // Originals — nur die Abweichung (z.B. Farbe) muss noch geändert werden.
   const openDuplicate = async (t: Template) => {
     setEditId(null);   // NEU anlegen, nicht das Original ändern
+    // Komponenten-State SOFORT leeren — der Dialog öffnet vor dem await der
+    // Set-Query; Reste des zuvor geöffneten Materials dürfen nicht in die
+    // Kopie gespeichert werden (oder gar dessen Original-Zeilen updaten).
+    setSetComponents([]);
+    setOriginalComponentIds([]);
     setForm({
       name: t.name, beschreibung: t.beschreibung, einheit: t.einheit, einzelpreis: t.einzelpreis,
       kategorie: t.kategorie, art: t.art || "",
-      artikelnummer: t.artikelnummer || "",
-      // Produktnummer NICHT kopieren — die ist pro Artikel eindeutig.
+      // Artikel-/Produktnummer NICHT kopieren — beide sind pro Artikel eindeutig.
+      artikelnummer: "",
       produktnummer: "",
       kurzbezeichnung: `${t.kurzbezeichnung || t.name} (Kopie)`,
       langbezeichnung: t.langbezeichnung || t.beschreibung, netto_preis: t.netto_preis,
@@ -281,11 +291,17 @@ export default function InvoiceTemplates() {
     setDialogOpen(true);
 
     if (t.ist_set) {
-      const { data } = await (supabase as any)
+      const { data, error } = await (supabase as any)
         .from("invoice_template_components")
         .select("id, component_template_id, menge, sort_order, component:invoice_templates!component_template_id(id, name, kurzbezeichnung, einheit, einzelpreis, ek_netto, vk_netto)")
         .eq("parent_template_id", t.id)
         .order("sort_order");
+      if (error) {
+        // Nicht still ein leeres Set duplizieren — der User denkt sonst,
+        // die Komponenten wären mitkopiert worden.
+        toast({ variant: "destructive", title: "Set-Komponenten konnten nicht geladen werden", description: error.message });
+        return;
+      }
       // WICHTIG: id weglassen — sonst würde der Save die Komponenten-Zeilen
       // des ORIGINALS updaten statt neue für die Kopie anzulegen.
       const rows = ((data as any[]) || []).map(r => {
@@ -301,10 +317,7 @@ export default function InvoiceTemplates() {
         };
       }) as SetComponent[];
       setSetComponents(rows);
-    } else {
-      setSetComponents([]);
     }
-    setOriginalComponentIds([]);
   };
 
   // Foto-Upload in den bestehenden project-materials-Bucket. Pfad ist
@@ -409,31 +422,41 @@ export default function InvoiceTemplates() {
         .single();
       if (error) { toast({ variant: "destructive", title: "Fehler", description: error.message }); return; }
       templateId = (data as any)?.id || null;
+      // Ab jetzt existiert die Zeile — bei einem Fehler in den Folge-Schritten
+      // (Set-Komponenten) darf ein erneutes Speichern KEIN zweites Material
+      // anlegen, sondern muss dieses aktualisieren.
+      if (templateId) setEditId(templateId);
     }
 
-    // Komponenten-Diff synchronisieren (nur relevant für Sets)
+    // Komponenten-Diff synchronisieren (nur relevant für Sets).
+    // Fehler werden gesammelt — sonst meldet der Toast "Erstellt", obwohl
+    // das Set still ohne/mit unvollständigen Komponenten gespeichert wurde.
+    let komponentenFehler: string | null = null;
     if (form.ist_set && templateId) {
       // Alte Rows entfernen, die nicht mehr in setComponents vorhanden sind
       const currentIds = setComponents.map(c => c.id).filter(Boolean) as string[];
       const toDelete = originalComponentIds.filter(id => !currentIds.includes(id));
       if (toDelete.length > 0) {
-        await (supabase as any).from("invoice_template_components")
+        const { error: delErr } = await (supabase as any).from("invoice_template_components")
           .delete().in("id", toDelete);
+        if (delErr) komponentenFehler = delErr.message;
       }
       // Insert / Update pro Komponente
       for (const c of setComponents) {
         if (c.id) {
-          await (supabase as any).from("invoice_template_components")
+          const { error: updErr } = await (supabase as any).from("invoice_template_components")
             .update({ menge: c.menge, sort_order: c.sort_order })
             .eq("id", c.id);
+          if (updErr) komponentenFehler = updErr.message;
         } else {
-          await (supabase as any).from("invoice_template_components")
+          const { error: insErr } = await (supabase as any).from("invoice_template_components")
             .insert({
               parent_template_id: templateId,
               component_template_id: c.component_template_id,
               menge: c.menge,
               sort_order: c.sort_order,
             });
+          if (insErr) komponentenFehler = insErr.message;
         }
       }
     } else if (!form.ist_set && originalComponentIds.length > 0 && templateId) {
@@ -442,6 +465,35 @@ export default function InvoiceTemplates() {
         .delete().eq("parent_template_id", templateId);
     }
 
+    if (komponentenFehler) {
+      // Dialog offen lassen — editId zeigt inzwischen auf die neue Zeile,
+      // ein erneutes Speichern aktualisiert also statt zu duplizieren.
+      // Komponenten-State aus der DB NEU laden (mit ids), sonst würden die
+      // bereits erfolgreich eingefügten Komponenten beim Retry doppelt angelegt.
+      const { data: freshRows } = await (supabase as any)
+        .from("invoice_template_components")
+        .select("id, component_template_id, menge, sort_order, component:invoice_templates!component_template_id(id, name, kurzbezeichnung, einheit, einzelpreis, ek_netto, vk_netto)")
+        .eq("parent_template_id", templateId)
+        .order("sort_order");
+      const fresh = ((freshRows as any[]) || []).map(r => {
+        const nettoFallback = Number(r.component?.einzelpreis) || 0;
+        return {
+          id: r.id,
+          component_template_id: r.component_template_id,
+          component_name: r.component?.kurzbezeichnung || r.component?.name || "?",
+          component_einheit: r.component?.einheit || "Stk.",
+          component_netto_preis: Number(r.component?.vk_netto ?? nettoFallback) || 0,
+          component_ek_netto: Number(r.component?.ek_netto ?? nettoFallback) || 0,
+          menge: Number(r.menge) || 1,
+          sort_order: Number(r.sort_order) || 0,
+        };
+      }) as SetComponent[];
+      setSetComponents(fresh);
+      setOriginalComponentIds(fresh.map(r => r.id!).filter(Boolean));
+      toast({ variant: "destructive", title: "Set unvollständig gespeichert", description: `Komponenten-Fehler: ${komponentenFehler} — bitte erneut speichern.` });
+      fetchTemplates();
+      return;
+    }
     toast({ title: editId ? "Gespeichert" : "Erstellt" });
     setDialogOpen(false);
     fetchTemplates();

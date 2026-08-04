@@ -133,6 +133,20 @@ export default function EmailLog() {
       const result = data as { ok?: boolean; error?: string } | null;
       if (!result?.ok) throw new Error(result?.error || "Versand fehlgeschlagen");
       toast({ title: "Erneut versendet" });
+      // Angebot beim Versand automatisch von "Entwurf" auf "Offen" heben —
+      // gleicher Automatismus wie beim Erstversand in InvoiceDetail.
+      // Konditionales Update: greift nur, wenn es noch ein Entwurf-Angebot ist.
+      if (row.invoice_id && row.invoice?.typ === "angebot") {
+        const { error: statusError } = await supabase
+          .from("invoices")
+          .update({ status: "offen" })
+          .eq("id", row.invoice_id)
+          .eq("typ", "angebot")
+          .eq("status", "entwurf");
+        if (statusError) {
+          toast({ variant: "destructive", title: "Email versendet", description: "Aber das Angebot konnte nicht auf 'Offen' gesetzt werden." });
+        }
+      }
       fetchLog();
     } catch (err) {
       toast({ variant: "destructive", title: "Retry fehlgeschlagen", description: (err as Error).message });

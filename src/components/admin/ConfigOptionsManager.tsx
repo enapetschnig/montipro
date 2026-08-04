@@ -125,22 +125,37 @@ export function ConfigOptionsManager({ kategorie, title, description, icon, show
   async function handleSave() {
     setSaving(true);
     try {
-      // Delete removed options
-      for (const id of deletedIds) {
+      // Komplett leere NEUE Zeilen still überspringen ("Neue Option" geklickt
+      // und nichts eingetragen). Teilweise gefüllte Zeilen ohne Wert/Label
+      // abfangen — eine Option mit wert='' würde die Auswahllisten der App
+      // zum Absturz bringen (Radix-Select verbietet leere Werte).
+      const zuSpeichern = options.filter(o => !(o._isNew && !o.wert.trim() && !o.label.trim()));
+      const unvollstaendig = zuSpeichern.find(o => !o.wert.trim() || !o.label.trim());
+      if (unvollstaendig) {
+        toast({ variant: "destructive", title: "Unvollständige Option", description: "Jede Option braucht einen Wert und ein Label — bitte ergänzen oder die Zeile löschen." });
+        setSaving(false);
+        return;
+      }
+
+      // Delete removed options — gebündelt in einem Request
+      if (deletedIds.length > 0) {
         const { error } = await supabase
           .from("admin_config_options" as never)
           .delete()
-          .eq("id", id);
+          .in("id", deletedIds as never[]);
         if (error) throw error;
       }
 
-      // Upsert remaining options
-      for (let i = 0; i < options.length; i++) {
-        const o = options[i];
+      // Nach der vom Admin eingetippten Reihenfolge sortieren und DIESE
+      // Ordnung normalisiert (1..n) persistieren. Vorher wurde die Eingabe
+      // im Reihenfolge-Feld komplett ignoriert (immer Anzeigeposition).
+      const sortiert = [...zuSpeichern].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+      for (let i = 0; i < sortiert.length; i++) {
+        const o = sortiert[i];
         const row = {
           kategorie: o.kategorie,
-          wert: o.wert,
-          label: o.label,
+          wert: o.wert.trim(),
+          label: o.label.trim(),
           sort_order: i + 1,
           is_active: o.is_active,
           farbe: o.farbe,
@@ -149,13 +164,13 @@ export function ConfigOptionsManager({ kategorie, title, description, icon, show
         if (o.id) {
           const { error } = await supabase
             .from("admin_config_options" as never)
-            .update(row)
+            .update(row as never)
             .eq("id", o.id);
           if (error) throw error;
         } else {
           const { error } = await supabase
             .from("admin_config_options" as never)
-            .insert(row);
+            .insert(row as never);
           if (error) throw error;
         }
       }
@@ -169,6 +184,10 @@ export function ConfigOptionsManager({ kategorie, title, description, icon, show
         description: message,
         variant: "destructive",
       });
+      // UI mit der DB resynchronisieren: bei einem Teil-Fehler sind einzelne
+      // Zeilen schon geschrieben/gelöscht — der lokale State wäre sonst
+      // stillschweigend veraltet.
+      await loadOptions();
     }
     setSaving(false);
   }

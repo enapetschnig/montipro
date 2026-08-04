@@ -57,7 +57,9 @@ export function PurchaseInvoiceDetailDialog({ invoiceId, onClose, onUpdated }: P
       .order("sort_order")
       .then(({ data }: any) => {
         if (data && data.length > 0) {
-          setKategorien(data.map((r: any) => ({ value: r.wert, label: r.label })));
+          // Leere Werte defensiv ausfiltern — ein SelectItem value="" würde
+          // die ganze Seite crashen (Radix verbietet leere Werte).
+          setKategorien(data.filter((r: any) => (r.wert || "").trim()).map((r: any) => ({ value: r.wert, label: r.label })));
         }
       });
   }, []);
@@ -334,9 +336,19 @@ export function PurchaseInvoiceDetailDialog({ invoiceId, onClose, onUpdated }: P
               </div>
               <div>
                 <Label>Kategorie</Label>
-                <Select value={form.kategorie || "sonstiges"} onValueChange={v => update("kategorie", v)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                {/* value ohne "sonstiges"-Fallback: der zeigte "Sonstiges" an,
+                    gespeichert wurde aber weiter NULL. Ohne Wert → Platzhalter.
+                    Eine deaktivierte/umbenannte Bestands-Kategorie wird als
+                    eigener Eintrag "(deaktiviert)" gezeigt, damit sie sichtbar
+                    bleibt und nicht versehentlich überschrieben wird. */}
+                <Select value={form.kategorie || undefined} onValueChange={v => update("kategorie", v)}>
+                  <SelectTrigger><SelectValue placeholder="Kategorie wählen" /></SelectTrigger>
                   <SelectContent>
+                    {form.kategorie && !kategorien.some(k => k.value === form.kategorie) && (
+                      <SelectItem value={form.kategorie}>
+                        {FALLBACK_KATEGORIEN.find(k => k.value === form.kategorie)?.label || form.kategorie} (deaktiviert)
+                      </SelectItem>
+                    )}
                     {kategorien.map(k => <SelectItem key={k.value} value={k.value}>{k.label}</SelectItem>)}
                   </SelectContent>
                 </Select>

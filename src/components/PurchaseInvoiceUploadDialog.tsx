@@ -98,7 +98,15 @@ export function PurchaseInvoiceUploadDialog({ open, onOpenChange, onUploaded, pr
         .order("sort_order")
         .then(({ data }: any) => {
           if (data && data.length > 0) {
-            setKategorien(data.map((r: any) => ({ value: r.wert, label: r.label })));
+            // Leere Werte defensiv ausfiltern (Radix-Select verbietet value="").
+            const active = data.filter((r: any) => (r.wert || "").trim()).map((r: any) => ({ value: r.wert, label: r.label }));
+            setKategorien(active);
+            // Default "material" könnte deaktiviert/umbenannt sein — dann auf
+            // die erste aktive Kategorie ausweichen (sonst leerer Select, aber
+            // ein unsichtbarer Wert würde gespeichert).
+            setForm(prev => active.some((k: any) => k.value === prev.kategorie)
+              ? prev
+              : { ...prev, kategorie: active[0]?.value ?? "" });
           }
         });
       // Wenn per Kamera-Button geöffnet → Datei direkt übernehmen + scannen

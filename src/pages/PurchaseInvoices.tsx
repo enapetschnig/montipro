@@ -92,7 +92,9 @@ export default function PurchaseInvoices() {
       .then(({ data }: any) => {
         if (data && data.length > 0) {
           const map: Record<string, string> = {};
-          data.forEach((r: any) => { map[r.wert] = r.label; });
+          // Leere Werte ausfiltern — sie würden im Filter-Select als
+          // SelectItem value="" die Seite crashen (Radix verbietet das).
+          data.forEach((r: any) => { if ((r.wert || "").trim()) map[r.wert] = r.label; });
           setKategorieLabels(map);
         }
       });

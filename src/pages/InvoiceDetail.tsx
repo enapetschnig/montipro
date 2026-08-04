@@ -4365,7 +4365,13 @@ export default function InvoiceDetail() {
                 .from("invoices")
                 .update({ status: "offen" })
                 .eq("id", invoiceId);
-              if (!error) updateField("status", "offen");
+              if (error) {
+                toast({ variant: "destructive", title: "Email versendet", description: "Aber das Angebot konnte nicht auf 'Offen' gesetzt werden." });
+              } else {
+                // Direkt setForm statt updateField: die DB ist schon aktuell,
+                // updateField würde fälschlich isDirty setzen (Verlassen-Warnung).
+                setForm(prev => ({ ...prev, status: "offen" }));
+              }
             }
           }}
         />
