@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { PageHeader } from "@/components/PageHeader";
-import { Plus, Trash2, Save, Package, Search, Filter, Upload, Star, TrendingUp, Percent, Euro, ImagePlus, X, Boxes } from "lucide-react";
+import { Plus, Trash2, Save, Package, Search, Filter, Upload, Star, TrendingUp, Percent, Euro, ImagePlus, X, Boxes, Copy } from "lucide-react";
 import { MaterialFileImport } from "@/components/MaterialFileImport";
 import { Textarea } from "@/components/ui/textarea";
 import { useEinheiten } from "@/hooks/useEinheiten";
@@ -250,6 +250,61 @@ export default function InvoiceTemplates() {
       setSetComponents([]);
       setOriginalComponentIds([]);
     }
+  };
+
+  // Material duplizieren: öffnet den Anlege-Dialog mit allen Werten des
+  // Originals — nur die Abweichung (z.B. Farbe) muss noch geändert werden.
+  const openDuplicate = async (t: Template) => {
+    setEditId(null);   // NEU anlegen, nicht das Original ändern
+    setForm({
+      name: t.name, beschreibung: t.beschreibung, einheit: t.einheit, einzelpreis: t.einzelpreis,
+      kategorie: t.kategorie, art: t.art || "",
+      artikelnummer: t.artikelnummer || "",
+      // Produktnummer NICHT kopieren — die ist pro Artikel eindeutig.
+      produktnummer: "",
+      kurzbezeichnung: `${t.kurzbezeichnung || t.name} (Kopie)`,
+      langbezeichnung: t.langbezeichnung || t.beschreibung, netto_preis: t.netto_preis,
+      brutto_preis: t.brutto_preis, ust_satz: t.ust_satz, ist_lagerartikel: t.ist_lagerartikel,
+      lieferant: t.lieferant || "", produktgruppe: t.produktgruppe || t.kategorie,
+      // Foto nicht mitkopieren — die Datei würde sonst von Original und
+      // Kopie GETEILT (Löschen in einem entfernt sie im anderen).
+      foto_path: null,
+      ist_set: t.ist_set,
+      ek_netto: t.ek_netto,
+      vk_netto: t.vk_netto || t.netto_preis,
+      bezugseinheit: t.bezugseinheit || "",
+      aufschlag_prozent: t.aufschlag_prozent,
+      vk_preis_manuell: t.vk_preis_manuell,
+    });
+    setPriceAdjustValue("");
+    setEditFotoUrl(null);
+    setDialogOpen(true);
+
+    if (t.ist_set) {
+      const { data } = await (supabase as any)
+        .from("invoice_template_components")
+        .select("id, component_template_id, menge, sort_order, component:invoice_templates!component_template_id(id, name, kurzbezeichnung, einheit, einzelpreis, ek_netto, vk_netto)")
+        .eq("parent_template_id", t.id)
+        .order("sort_order");
+      // WICHTIG: id weglassen — sonst würde der Save die Komponenten-Zeilen
+      // des ORIGINALS updaten statt neue für die Kopie anzulegen.
+      const rows = ((data as any[]) || []).map(r => {
+        const nettoFallback = Number(r.component?.einzelpreis) || 0;
+        return {
+          component_template_id: r.component_template_id,
+          component_name: r.component?.kurzbezeichnung || r.component?.name || "?",
+          component_einheit: r.component?.einheit || "Stk.",
+          component_netto_preis: Number(r.component?.vk_netto ?? nettoFallback) || 0,
+          component_ek_netto: Number(r.component?.ek_netto ?? nettoFallback) || 0,
+          menge: Number(r.menge) || 1,
+          sort_order: Number(r.sort_order) || 0,
+        };
+      }) as SetComponent[];
+      setSetComponents(rows);
+    } else {
+      setSetComponents([]);
+    }
+    setOriginalComponentIds([]);
   };
 
   // Foto-Upload in den bestehenden project-materials-Bucket. Pfad ist
@@ -530,14 +585,20 @@ export default function InvoiceTemplates() {
                     {items.map(t => (
                       <TableRow key={t.id} className="cursor-pointer hover:bg-muted/50" onClick={() => openEdit(t)}>
                         <TableCell>
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={async (e) => {
-                            e.stopPropagation();
-                            const newVal = !t.ist_favorit;
-                            await supabase.from("invoice_templates").update({ ist_favorit: newVal } as any).eq("id", t.id);
-                            setTemplates(prev => prev.map(item => item.id === t.id ? { ...item, ist_favorit: newVal } : item));
-                          }}>
-                            <Star className={`w-4 h-4 ${t.ist_favorit ? "fill-yellow-400 text-yellow-400" : "text-muted-foreground"}`} />
-                          </Button>
+                          <div className="flex items-center">
+                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={async (e) => {
+                              e.stopPropagation();
+                              const newVal = !t.ist_favorit;
+                              await supabase.from("invoice_templates").update({ ist_favorit: newVal } as any).eq("id", t.id);
+                              setTemplates(prev => prev.map(item => item.id === t.id ? { ...item, ist_favorit: newVal } : item));
+                            }}>
+                              <Star className={`w-4 h-4 ${t.ist_favorit ? "fill-yellow-400 text-yellow-400" : "text-muted-foreground"}`} />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" title="Material duplizieren"
+                              onClick={(e) => { e.stopPropagation(); openDuplicate(t); }}>
+                              <Copy className="w-4 h-4 text-muted-foreground" />
+                            </Button>
+                          </div>
                         </TableCell>
                         <TableCell>
                           {t.foto_path && fotoUrls[t.id] ? (

@@ -39,7 +39,7 @@ import { PlantafelDefaultColors } from "@/components/admin/PlantafelDefaultColor
 import { listAllActiveProjects, getEmployeeAccessibleProjectIds, syncEmployeeProjectAccess, loadEmployeeProjectRelations, type ProjectLite, type EmployeeProjectRelation } from "@/lib/projectAccess";
 import { PermissionMatrix } from "@/components/admin/PermissionMatrix";
 import { useConfigOptions } from "@/hooks/useConfigOptions";
-import { Cloud, Building, AlertTriangle, Truck, Briefcase, HardHat, Layers } from "lucide-react";
+import { Cloud, Building, AlertTriangle, Truck, Briefcase, HardHat, Layers, FileDown } from "lucide-react";
 
 type Profile = {
   id: string;
@@ -1281,6 +1281,7 @@ export default function Admin() {
             <ConfigOptionsManager kategorie="firma_extern" title="Firma extern (Ersttermin)" description="Auswahl externer Firmen/Subunternehmer bei Ersttermin-Protokollen" icon={<HardHat className="h-5 w-5" />} />
             <ConfigOptionsManager kategorie="kunde_herkunft" title="Kunde — Herkunft" description="Über welche Quelle ist der Kunde zu uns gekommen (Empfehlung, Google, Messe …)" icon={<UserPlus className="h-5 w-5" />} />
             <ConfigOptionsManager kategorie="projekt_bereich" title="Projekt — Bereich" description="Geschäftsbereich-Auswahl bei Projekten (Innenausbau, Garten, Fenster …)" icon={<Layers className="h-5 w-5" />} />
+            <ConfigOptionsManager kategorie="eingangsrechnung_kategorie" title="Eingangsrechnungen — Kategorien" description="Kategorien für Eingangsrechnungen/Kassenbons (Material, Werkzeug …) — frei anleg- und umbenennbar" icon={<FileDown className="h-5 w-5" />} />
             <VehicleManager />
           </TabsContent>
 

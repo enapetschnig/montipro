@@ -4357,6 +4357,17 @@ export default function InvoiceDetail() {
             brutto_summe: bruttoSumme,
           }}
           pdfBlob={sendEmailPdfBlob}
+          onSent={async () => {
+            // Angebot beim Versand automatisch von "Entwurf" auf "Offen" —
+            // ein verschicktes Angebot ist kein Entwurf mehr (Wunsch 27.07.2026).
+            if (form.typ === "angebot" && form.status === "entwurf" && invoiceId) {
+              const { error } = await supabase
+                .from("invoices")
+                .update({ status: "offen" })
+                .eq("id", invoiceId);
+              if (!error) updateField("status", "offen");
+            }
+          }}
         />
         {/* PDF Preview Dialog — works both before and after saving */}
         <InvoicePdfPreview
