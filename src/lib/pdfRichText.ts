@@ -34,7 +34,13 @@ type PdfLike = {
  * durchsuchen lässt.
  */
 function fuerPdf(text: string): string {
-  return text.replace(/\u00a0/g, " ");
+  return text
+    .replace(/\u00a0/g, " ")
+    // Tabulator ebenso: die Bibliothek zeichnet ihn als acht Leerzeichen,
+    // misst ihn aber wie ein einziges Zeichen. Ohne das Ersetzen wird eine
+    // Zeile mit Tabulatoren rund 9 mm breiter als berechnet und l\u00e4uft \u00fcber
+    // den Spaltenrand hinaus.
+    .replace(/\t/g, "        ");
 }
 
 function schriftStil(abschnitt: TextAbschnitt, basisKursiv: boolean): string {
