@@ -306,8 +306,16 @@ export default function Invoices() {
         bank, logoUri, qrUri, firmenUid, invoiceLayout
       );
 
+      // Anlagen anbauen, damit der Schnell-Download dasselbe Dokument liefert
+      // wie der Versand aus der Rechnung heraus.
+      const { pdfMitAnlagen } = await import("@/lib/invoiceAttachments");
+      const { blob: fertigesPdf, fehler } = await pdfMitAnlagen(pdfBlob, inv.id);
+      if (fehler.length > 0) {
+        toast({ variant: "destructive", title: "Anlage fehlt im PDF", description: fehler.join(" · ") });
+      }
+
       // Direct download
-      const url = URL.createObjectURL(pdfBlob);
+      const url = URL.createObjectURL(fertigesPdf);
       const a = document.createElement("a");
       a.href = url;
       a.download = `${nummer}.pdf`;
@@ -385,8 +393,15 @@ export default function Invoices() {
         bank, logoUri, qrUri, firmenUid, invoiceLayout
       );
 
+      // Auch der Ausdruck enthält die Anlagen.
+      const { pdfMitAnlagen } = await import("@/lib/invoiceAttachments");
+      const { blob: fertigesPdf, fehler } = await pdfMitAnlagen(pdfBlob, inv.id);
+      if (fehler.length > 0) {
+        toast({ variant: "destructive", title: "Anlage fehlt im Ausdruck", description: fehler.join(" · ") });
+      }
+
       // Open PDF in new tab for printing
-      const url = URL.createObjectURL(pdfBlob);
+      const url = URL.createObjectURL(fertigesPdf);
       const win = window.open(url, "_blank");
       if (win) {
         win.addEventListener("load", () => {

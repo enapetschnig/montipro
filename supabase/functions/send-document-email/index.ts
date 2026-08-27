@@ -32,7 +32,16 @@ interface SendBody {
   body_html: string;
   pdf_base64?: string | null;
   pdf_filename?: string | null;
+  /**
+   * Weitere Anlagen (Unterlagen fremder Firmen), die der Mail zusätzlich
+   * zum Dokument beigelegt werden. Optional — ältere Clients schicken das
+   * Feld nicht, dann verhält sich alles wie bisher.
+   */
+  extra_attachments?: Array<{ filename: string; content: string }> | null;
 }
+
+/** Resend lehnt große Mails ab; base64 bläht die Nutzlast um rund ein Drittel. */
+const MAX_ANHANG_BYTES = 30 * 1024 * 1024;
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") {
@@ -118,7 +127,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     reply_to: replyTo,
     subject: body.subject,
     body_html: body.body_html,
-    attachment_filename: body.pdf_filename || null,
+    // Alle Anhänge protokollieren, nicht nur das Hauptdokument.
+    attachment_filename: [
+      body.pdf_filename,
+      ...(body.extra_attachments || []).map(a => a?.filename),
+    ].filter(Boolean).join(", ") || null,
     provider: "resend",
     status: "queued",
     sent_by: caller.id,
@@ -148,13 +161,33 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (body.cc && body.cc.length > 0) {
     resendPayload.cc = body.cc;
   }
+  const anhaenge: Array<{ filename: string; content: string }> = [];
   if (body.pdf_base64 && body.pdf_filename) {
-    resendPayload.attachments = [
-      {
-        filename: body.pdf_filename,
-        content: body.pdf_base64,
-      },
-    ];
+    anhaenge.push({ filename: body.pdf_filename, content: body.pdf_base64 });
+  }
+  for (const extra of body.extra_attachments || []) {
+    if (extra?.filename && extra?.content) {
+      anhaenge.push({ filename: extra.filename, content: extra.content });
+    }
+  }
+  if (anhaenge.length > 0) {
+    // Größe prüfen, bevor Resend mit einem nichtssagenden Fehler abbricht.
+    const gesamt = anhaenge.reduce((s, a) => s + a.content.length, 0);
+    if (gesamt > MAX_ANHANG_BYTES) {
+      const mb = (gesamt / 1024 / 1024).toFixed(1);
+      await supabaseAuth
+        .from("email_log")
+        .update({ status: "failed", error_message: `Anhänge zu groß (${mb} MB)` })
+        .eq("id", logId);
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error: `Die Anhänge sind mit ${mb} MB zu groß für den Versand. Bitte einzelne Anlagen entfernen oder getrennt schicken.`,
+        }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+    resendPayload.attachments = anhaenge;
   }
 
   // Resend aufrufen

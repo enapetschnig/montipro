@@ -14,6 +14,8 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Plus, Trash2, Save, Download, Copy, ArrowRightLeft, AlertTriangle, Package, Ban, FileDown, TrendingUp, Eye, Import, FileText, Printer, Star, ChevronUp, ChevronDown, X, Pencil, Undo2, MapPin, Mail } from "lucide-react";
 import { InvoicePdfPreview } from "@/components/InvoicePdfPreview";
 import { SendEmailDialog } from "@/components/SendEmailDialog";
+import { InvoiceAttachmentsCard } from "@/components/InvoiceAttachmentsCard";
+import { zumBeilegen, type InvoiceAttachment } from "@/lib/invoiceAttachments";
 import { ImportMaterialsDialog } from "@/components/ImportMaterialsDialog";
 import { ImportFromProjectDialog } from "@/components/ImportFromProjectDialog";
 import { ImportDisturbanceDialog } from "@/components/ImportDisturbanceDialog";
@@ -358,6 +360,10 @@ export default function InvoiceDetail() {
   // Rechnungen: komplett locked nach Speichern. Angebote: Positionen + Kundendaten editierbar
   const isLocked = !isNew && id !== "new" && !!invoiceId && form.typ === "rechnung";
   const isKundeLocked = !isNew && id !== "new" && !!invoiceId && form.typ === "rechnung";
+
+  // Anlagen fremder Firmen. Die mit modus='separat' werden der Email als
+  // eigene Dateien beigelegt; die übrigen sind bereits im PDF enthalten.
+  const [anlagen, setAnlagen] = useState<InvoiceAttachment[]>([]);
 
   // Angebot→Rechnung Vergleichs-Dialog
   const [convertDialogOpen, setConvertDialogOpen] = useState(false);
@@ -1533,7 +1539,7 @@ export default function InvoiceDetail() {
           qrDataUri = await generateEpcQrCode(bruttoSumme, form.nummer || "", bank);
         } catch { /* optional */ }
       }
-      const pdfBlob = await generateInvoicePdf(
+      const basisPdf = await generateInvoicePdf(
         invoiceForPdf,
         items as any,
         bank,
@@ -1542,6 +1548,17 @@ export default function InvoiceDetail() {
         firmenUid,
         invoiceLayout,
       );
+      // Auch die Ablage im Projektordner enthält die Anlagen — das archivierte
+      // Dokument soll dem entsprechen, was der Kunde bekommen hat.
+      const { pdfMitAnlagen } = await import("@/lib/invoiceAttachments");
+      const { blob: pdfBlob, fehler: anlagenFehler } = await pdfMitAnlagen(basisPdf, invId);
+      if (anlagenFehler.length > 0) {
+        toast({
+          variant: "destructive",
+          title: "Anlage fehlt in der Projektablage",
+          description: anlagenFehler.join(" · "),
+        });
+      }
 
       const basename = `${form.typ === "rechnung" ? "Rechnung" : "Angebot"}-${form.nummer || invId.slice(0, 8)}-${form.datum}`;
       await uploadProjectPdf({
@@ -1763,7 +1780,7 @@ export default function InvoiceDetail() {
         qrDataUri = await generateEpcQrCode(bruttoSumme, form.nummer || "", bank);
       } catch { /* QR optional — Render geht ohne weiter */ }
     }
-    return generateInvoicePdf(
+    const basisPdf = await generateInvoicePdf(
       invoiceForPdf,
       items as any,
       bank,
@@ -1772,6 +1789,19 @@ export default function InvoiceDetail() {
       firmenUid,
       invoiceLayout,
     );
+
+    // Anlagen mit "Ins Dokument" hinten anbauen. Ohne Anlagen kommt exakt
+    // derselbe Blob zurück wie vorher — der bestehende Weg bleibt unberührt.
+    const { pdfMitAnlagen } = await import("@/lib/invoiceAttachments");
+    const { blob, fehler } = await pdfMitAnlagen(basisPdf, invoiceId);
+    if (fehler.length > 0) {
+      toast({
+        variant: "destructive",
+        title: "Anlage nicht eingebaut",
+        description: fehler.join(" · "),
+      });
+    }
+    return blob;
   };
 
   const handleDownloadPdf = async () => {
@@ -4049,6 +4079,19 @@ export default function InvoiceDetail() {
             </CardContent>
           </Card>
 
+          {/* Anlagen fremder Firmen (Fensterbauer-Angebot, Zeichnungen, ...).
+              Bewusst NICHT an isLocked gekoppelt: eine gespeicherte Rechnung
+              ist inhaltlich festgeschrieben, aber welche Unterlagen man dem
+              Kunden mitschickt, muss man weiterhin ergänzen können. Nur bei
+              stornierten Belegen wird nichts mehr geändert. */}
+          {!isNew && (
+            <InvoiceAttachmentsCard
+              invoiceId={invoiceId}
+              disabled={form.status === "storniert"}
+              onChanged={setAnlagen}
+            />
+          )}
+
           {/* Archivierte PDFs */}
           {!isNew && storedPdfs.length > 0 && (
             <Card>
@@ -4357,6 +4400,7 @@ export default function InvoiceDetail() {
             brutto_summe: bruttoSumme,
           }}
           pdfBlob={sendEmailPdfBlob}
+          extraAttachments={zumBeilegen(anlagen).map(a => ({ file_path: a.file_path, file_name: a.file_name }))}
           onSent={async () => {
             // Angebot beim Versand automatisch von "Entwurf" auf "Offen" —
             // ein verschicktes Angebot ist kein Entwurf mehr (Wunsch 27.07.2026).
@@ -4381,6 +4425,7 @@ export default function InvoiceDetail() {
           onClose={() => setPreviewOpen(false)}
           onSave={handleSaveFromPreview}
           onSavedClose={() => navigate("/invoices")}
+          invoiceId={invoiceId || undefined}
           saving={saving}
           saved={previewSaved}
           fileName={form.nummer || (form.typ === "angebot" ? "Angebot" : "Rechnung")}

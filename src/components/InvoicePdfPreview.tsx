@@ -49,6 +49,8 @@ export function InvoicePdfPreview({
   const [generating, setGenerating] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Anlagen, die nicht ins Dokument eingebaut werden konnten.
+  const [anlagenFehler, setAnlagenFehler] = useState<string[]>([]);
 
   const formDataRef = useRef(formData);
   const itemsRef = useRef(items);
@@ -64,6 +66,7 @@ export function InvoicePdfPreview({
       if (pdfUrl) URL.revokeObjectURL(pdfUrl);
       setPdfUrl(null);
       setError(null);
+      setAnlagenFehler([]);
       return;
     }
     generatePdf();
@@ -76,6 +79,7 @@ export function InvoicePdfPreview({
   const generatePdf = async () => {
     setGenerating(true);
     setError(null);
+    setAnlagenFehler([]);
     try {
       // Load bank data + firmen UID
       let bankData: BankData = { ...DEFAULT_BANK };
@@ -125,7 +129,7 @@ export function InvoicePdfPreview({
         tage: tageMatch ? Number(tageMatch[0]) : 14,
       });
 
-      const blob = await generateInvoicePdf(
+      const basisPdf = await generateInvoicePdf(
         invoiceWithTexts,
         itemsRef.current,
         bankData,
@@ -134,6 +138,17 @@ export function InvoicePdfPreview({
         loadedFirmenUid,
         layout
       );
+
+      // Die Vorschau zeigt dasselbe Dokument, das der Kunde bekommt —
+      // inklusive angehängter Fremdunterlagen. Ohne Anlagen (und bei einem
+      // noch ungespeicherten Beleg ohne invoiceId) bleibt es unverändert.
+      const { pdfMitAnlagen } = await import("@/lib/invoiceAttachments");
+      const { blob, fehler } = await pdfMitAnlagen(basisPdf, invoiceId);
+      // Vor dem Setzen leeren, damit keine Meldung eines früheren Laufs
+      // stehen bleibt, wenn der Fehler behoben wurde.
+      // Wenn eine Anlage nicht eingebaut werden konnte, muss das GERADE in
+      // der Vorschau auffallen — hier prüft man das Dokument vor dem Versand.
+      setAnlagenFehler(fehler);
 
       if (pdfUrl) URL.revokeObjectURL(pdfUrl);
       setPdfUrl(URL.createObjectURL(blob));
@@ -224,6 +239,12 @@ export function InvoicePdfPreview({
             </div>
           ) : pdfUrl ? (
             <div className="relative w-full h-full">
+              {anlagenFehler.length > 0 && (
+                <div className="absolute top-0 inset-x-0 z-10 bg-amber-50 border-b border-amber-300 px-3 py-2 text-xs text-amber-900">
+                  <span className="font-medium">Anlage nicht im Dokument: </span>
+                  {anlagenFehler.join(" · ")}
+                </div>
+              )}
               <iframe src={pdfUrl} className="w-full h-full border-0" title="PDF Preview" />
               {!saved && (
                 <div className="absolute inset-0 pointer-events-none flex items-center justify-center" aria-hidden="true">

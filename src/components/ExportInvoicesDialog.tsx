@@ -121,6 +121,8 @@ export function ExportInvoicesDialog({ open, onClose, bankData }: ExportInvoices
       const zip = new JSZip();
 
       let failed = 0;
+      // Dokumente, die zwar exportiert wurden, denen aber eine Anlage fehlt.
+      const anlagenProbleme: string[] = [];
       for (let i = 0; i < invoices.length; i++) {
         const inv = invoices[i];
         setProgress(`PDF ${i + 1} von ${invoices.length}: ${inv.nummer}...`);
@@ -185,6 +187,16 @@ export function ExportInvoicesDialog({ open, onClose, bankData }: ExportInvoices
               })),
               bankData, logoUri, qrUri, firmenUid, layout
             );
+            // Anlagen anbauen — im Sammelexport soll dasselbe Dokument
+            // liegen, das beim Kunden angekommen ist.
+            const { pdfMitAnlagen } = await import("@/lib/invoiceAttachments");
+            const zusammengebaut = await pdfMitAnlagen(pdfBlob, inv.id);
+            pdfBlob = zusammengebaut.blob;
+            if (zusammengebaut.fehler.length > 0) {
+              // Nicht nur zählen: ohne Nummer weiß man später nicht, welches
+              // Dokument im ZIP unvollständig ist.
+              anlagenProbleme.push(`${inv.nummer}: ${zusammengebaut.fehler.join(" · ")}`);
+            }
             fileName = `${inv.nummer}.pdf`;
           }
           zip.file(fileName, pdfBlob);
@@ -214,6 +226,13 @@ export function ExportInvoicesDialog({ open, onClose, bankData }: ExportInvoices
           ? `${successCount} von ${invoices.length} Rechnungen exportiert (${failed} fehlgeschlagen)`
           : `${successCount} Rechnungen als ZIP heruntergeladen`,
       });
+      if (anlagenProbleme.length > 0) {
+        toast({
+          variant: "destructive",
+          title: anlagenProbleme.length === 1 ? "Einem Dokument fehlt eine Anlage" : `${anlagenProbleme.length} Dokumenten fehlt eine Anlage`,
+          description: anlagenProbleme.slice(0, 3).join(" · ") + (anlagenProbleme.length > 3 ? " …" : ""),
+        });
+      }
       onClose();
     } catch (err: any) {
       toast({ variant: "destructive", title: "Export fehlgeschlagen", description: err.message });

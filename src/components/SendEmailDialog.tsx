@@ -13,6 +13,7 @@ import { Loader2, Send, Paperclip } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { getDocConfig } from "@/lib/documentTypes";
+import { ANLAGEN_BUCKET } from "@/lib/invoiceAttachments";
 
 interface InvoiceLike {
   id?: string | null;
@@ -39,6 +40,9 @@ interface Props {
   pdfFilenameOverride?: string;
   // Header-Titel-Override. Default: "<typLabel> <nummer> per Email senden"
   titleOverride?: string;
+  // Anlagen fremder Firmen, die als eigene Dateien mitgeschickt werden
+  // (Modus "separat"). Die übrigen stecken bereits im PDF.
+  extraAttachments?: Array<{ file_path: string; file_name: string }>;
 }
 
 const fmtCurrency = (n: number | null | undefined) => {
@@ -87,7 +91,7 @@ async function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-export function SendEmailDialog({ open, onOpenChange, invoice, pdfBlob, onSent, templateTyp, pdfFilenameOverride, titleOverride }: Props) {
+export function SendEmailDialog({ open, onOpenChange, invoice, pdfBlob, onSent, templateTyp, pdfFilenameOverride, titleOverride, extraAttachments }: Props) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
@@ -149,6 +153,26 @@ export function SendEmailDialog({ open, onOpenChange, invoice, pdfBlob, onSent, 
         pdfBase64 = await blobToBase64(pdfBlob);
         pdfFilename = pdfFilenameOverride || `${invoice.nummer || invoice.typ}.pdf`;
       }
+      // Separate Anlagen laden und als eigene Dateien mitschicken.
+      // Ein Ladefehler darf den Versand nicht verhindern — er wird gemeldet,
+      // die Mail geht mit den übrigen Anhängen raus.
+      const extras: Array<{ filename: string; content: string }> = [];
+      const extraFehler: string[] = [];
+      for (const anlage of extraAttachments || []) {
+        try {
+          const { data: datei, error: dlErr } = await supabase.storage
+            .from(ANLAGEN_BUCKET)
+            .download(anlage.file_path);
+          if (dlErr || !datei) throw new Error(dlErr?.message || "nicht gefunden");
+          extras.push({ filename: anlage.file_name, content: await blobToBase64(datei) });
+        } catch (err) {
+          extraFehler.push(`${anlage.file_name}: ${(err as Error).message}`);
+        }
+      }
+      if (extraFehler.length > 0) {
+        toast({ variant: "destructive", title: "Anlage nicht angehängt", description: extraFehler.join(" · ") });
+      }
+
       const ccList = cc.split(/[,;\s]+/).map(s => s.trim()).filter(s => s.includes("@"));
       const { data, error } = await supabase.functions.invoke("send-document-email", {
         body: {
@@ -160,16 +184,34 @@ export function SendEmailDialog({ open, onOpenChange, invoice, pdfBlob, onSent, 
           body_html: bodyHtml,
           pdf_base64: pdfBase64,
           pdf_filename: pdfFilename,
+          extra_attachments: extras.length > 0 ? extras : undefined,
         },
       });
       if (error) {
-        throw new Error(error.message || "Edge-Function fehlgeschlagen");
+        // supabase-js verpackt jede Nicht-200-Antwort in "Edge Function
+        // returned a non-2xx status code" und verwirft den Body. Der echte
+        // Grund (z.B. "Anhänge zu groß") steht aber genau dort.
+        let text = error.message || "Versand fehlgeschlagen";
+        try {
+          const ctx = (error as { context?: Response }).context;
+          if (ctx && typeof ctx.clone === "function") {
+            const body = await ctx.clone().text();
+            const geparst = JSON.parse(body) as { error?: string };
+            if (geparst?.error) text = geparst.error;
+          }
+        } catch { /* Body nicht lesbar — bei der Standardmeldung bleiben */ }
+        throw new Error(text);
       }
       const result = data as { ok?: boolean; error?: string } | null;
       if (!result?.ok) {
         throw new Error(result?.error || "Versand fehlgeschlagen");
       }
-      toast({ title: "Email versendet", description: `An ${to.trim()}` });
+      toast({
+        title: "Email versendet",
+        description: extras.length > 0
+          ? `An ${to.trim()} · mit ${extras.length} ${extras.length === 1 ? "zusätzlicher Anlage" : "zusätzlichen Anlagen"}`
+          : `An ${to.trim()}`,
+      });
       onOpenChange(false);
       onSent?.();
     } catch (err) {

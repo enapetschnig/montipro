@@ -53,8 +53,11 @@ export function WeeklyAssignmentWidget({ userId }: Props) {
 
       const [{ data: assignData }, { data: holidayData }, { data: leaveData }] =
         await Promise.all([
-          supabase
-            .from("worker_assignments")
+          // Der eingebettete projects-Join treibt die Typherleitung über die
+          // Compiler-Grenze (TS2589), sobald das Schema wächst. Der Cast
+          // entlastet sie; die Felder werden unten ohnehin von Hand auf
+          // WeekAssignment abgebildet.
+          (supabase.from("worker_assignments") as any)
             .select("datum, project_id, notizen, projects:project_id(name)")
             .eq("user_id", userId)
             .gte("datum", fromDate)

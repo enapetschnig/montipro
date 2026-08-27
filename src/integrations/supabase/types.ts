@@ -2186,6 +2186,56 @@ export type Database = {
           },
         ]
       }
+      invoice_attachments: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          file_name: string
+          file_path: string
+          file_size: number | null
+          id: string
+          invoice_id: string
+          mime_type: string | null
+          modus: string
+          seiten: number | null
+          sort_order: number
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          file_name: string
+          file_path: string
+          file_size?: number | null
+          id?: string
+          invoice_id: string
+          mime_type?: string | null
+          modus?: string
+          seiten?: number | null
+          sort_order?: number
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          file_name?: string
+          file_path?: string
+          file_size?: number | null
+          id?: string
+          invoice_id?: string
+          mime_type?: string | null
+          modus?: string
+          seiten?: number | null
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_attachments_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invoice_payments: {
         Row: {
           betrag: number
