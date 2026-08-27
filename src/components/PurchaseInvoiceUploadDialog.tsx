@@ -5,9 +5,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Upload, X, FileText, Image as ImageIcon, Loader2, Sparkles } from "lucide-react";
+import { Upload, X, FileText, Image as ImageIcon, Loader2, Sparkles, Undo2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { istGutschrift } from "@/lib/purchaseInvoiceAmounts";
 
 interface Props {
   open: boolean;
@@ -36,6 +37,14 @@ const FALLBACK_KATEGORIEN = [
 export function PurchaseInvoiceUploadDialog({ open, onOpenChange, onUploaded, prefillProjectId, initialFile }: Props) {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Jeder KI-Scan bekommt eine laufende Nummer. Trifft ein Ergebnis ein,
+  // dessen Nummer nicht mehr die aktuelle ist, wird es verworfen: der Dialog
+  // bleibt gemountet, ein Scan aus einem abgebrochenen Vorgang würde sonst
+  // seine Werte (inklusive "Gutschrift") in den nächsten Beleg schreiben.
+  const scanLauf = useRef(0);
+  // Hat der Bearbeiter die Belegart selbst gewählt, darf die KI sie nicht
+  // mehr überstimmen — auch nicht beim erneuten Scannen.
+  const belegArtManuell = useRef(false);
   const [dragging, setDragging] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
@@ -55,6 +64,7 @@ export function PurchaseInvoiceUploadDialog({ open, onOpenChange, onUploaded, pr
   }, [files]);
 
   const [form, setForm] = useState({
+    beleg_art: "rechnung",
     lieferant: "",
     rechnungsnummer: "",
     rechnungsdatum: new Date().toISOString().split("T")[0],
@@ -69,10 +79,18 @@ export function PurchaseInvoiceUploadDialog({ open, onOpenChange, onUploaded, pr
     notizen: "",
   });
 
+  const gutschrift = istGutschrift(form.beleg_art);
+
   useEffect(() => {
     if (open) {
+      // Laufende Scans aus einem vorherigen Vorgang entwerten und den
+      // Spinner zurücksetzen — sonst bliebe er nach einem Abbruch hängen.
+      scanLauf.current++;
+      setScanning(false);
+      belegArtManuell.current = false;
       setFiles([]);
       setForm({
+        beleg_art: "rechnung",
         lieferant: "",
         rechnungsnummer: "",
         rechnungsdatum: new Date().toISOString().split("T")[0],
@@ -114,6 +132,11 @@ export function PurchaseInvoiceUploadDialog({ open, onOpenChange, onUploaded, pr
         setFiles([initialFile]);
         void scanFileWithAi(initialFile);
       }
+    } else {
+      // Beim Schließen ebenfalls entwerten — sonst meldet ein noch laufender
+      // Scan sein Ergebnis per Toast in einen längst geschlossenen Dialog.
+      scanLauf.current++;
+      setScanning(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, prefillProjectId, initialFile]);
@@ -180,6 +203,8 @@ export function PurchaseInvoiceUploadDialog({ open, onOpenChange, onUploaded, pr
   // KI-Scan: Rechnungsdaten aus einer Datei extrahieren und Form vorausfüllen.
   // Funktioniert mit Bildern (direkt) UND PDFs (1. Seite → JPEG-Rendering).
   const scanFileWithAi = async (file: File) => {
+    const dieserLauf = ++scanLauf.current;
+    const veraltet = () => dieserLauf !== scanLauf.current;
     setScanning(true);
     try {
       // Für mehrseitige PDFs: ALLE Seiten rendern → an GPT schicken.
@@ -239,10 +264,21 @@ export function PurchaseInvoiceUploadDialog({ open, onOpenChange, onUploaded, pr
       const parsed = data?.data;
       if (!parsed) throw new Error("Keine Daten erkannt");
 
+      // Ergebnis eines überholten Scans (Dialog inzwischen neu geöffnet oder
+      // eine andere Datei gescannt) verwerfen, statt ein fremdes Formular zu
+      // überschreiben.
+      if (veraltet()) return;
+
+      // Erkennt die KI eine Gutschrift, stufen wir nur HOCH (rechnung →
+      // gutschrift), nie zurück — und nur, solange der Bearbeiter die
+      // Belegart nicht selbst gesetzt hat. Seine Wahl gilt.
+      const kiGutschrift = istGutschrift(parsed.beleg_art) && !belegArtManuell.current;
+
       // Form vorausfüllen — KI-Werte haben Vorrang (überschreiben leere Defaults),
       // bestehende manuelle Eingabe bleibt nur dann, wenn KI nichts findet.
       setForm(prev => ({
         ...prev,
+        beleg_art: kiGutschrift ? "gutschrift" : prev.beleg_art,
         lieferant: parsed.lieferant || prev.lieferant,
         rechnungsnummer: parsed.rechnungsnummer || prev.rechnungsnummer,
         rechnungsdatum: parsed.rechnungsdatum || prev.rechnungsdatum,
@@ -255,15 +291,17 @@ export function PurchaseInvoiceUploadDialog({ open, onOpenChange, onUploaded, pr
       }));
 
       toast({
-        title: "KI-Scan erfolgreich",
+        title: kiGutschrift ? "Gutschrift erkannt" : "KI-Scan erfolgreich",
         description: parsed.betrag_brutto
-          ? `Brutto € ${Number(parsed.betrag_brutto).toFixed(2)} · Bitte prüfen`
+          ? `${kiGutschrift ? "Gutschrift über" : "Brutto"} € ${Number(parsed.betrag_brutto).toFixed(2)} · Bitte prüfen`
           : "Daten wurden übernommen — bitte prüfen",
       });
     } catch (err: any) {
+      if (veraltet()) return;
       toast({ variant: "destructive", title: "KI-Scan fehlgeschlagen", description: err.message });
     } finally {
-      setScanning(false);
+      // Den Spinner nur abschalten, wenn kein neuerer Scan läuft.
+      if (!veraltet()) setScanning(false);
     }
   };
 
@@ -277,7 +315,13 @@ export function PurchaseInvoiceUploadDialog({ open, onOpenChange, onUploaded, pr
       return;
     }
     if (!form.betrag_brutto || parseFloat(form.betrag_brutto) <= 0) {
-      toast({ variant: "destructive", title: "Betrag fehlt", description: "Bitte Bruttobetrag eingeben" });
+      toast({
+        variant: "destructive",
+        title: "Betrag fehlt",
+        description: gutschrift
+          ? "Bitte den Gutschriftbetrag als positive Zahl eingeben — abgezogen wird er automatisch."
+          : "Bitte Bruttobetrag eingeben",
+      });
       return;
     }
 
@@ -298,6 +342,7 @@ export function PurchaseInvoiceUploadDialog({ open, onOpenChange, onUploaded, pr
           .from("purchase_invoices")
           .insert({
             created_by: user.id,
+            beleg_art: form.beleg_art,
             project_id: form.project_id || null,
             lieferant: form.lieferant.trim(),
             rechnungsnummer: form.rechnungsnummer.trim() || null,
@@ -347,7 +392,12 @@ export function PurchaseInvoiceUploadDialog({ open, onOpenChange, onUploaded, pr
         } as any).eq("id", inv.id);
       }
 
-      toast({ title: "Gespeichert", description: `${files.length} ${files.length === 1 ? "Rechnung" : "Rechnungen"} hochgeladen` });
+      toast({
+        title: "Gespeichert",
+        description: gutschrift
+          ? `${files.length} ${files.length === 1 ? "Gutschrift" : "Gutschriften"} hochgeladen — der Betrag wird abgezogen`
+          : `${files.length} ${files.length === 1 ? "Rechnung" : "Rechnungen"} hochgeladen`,
+      });
       onUploaded();
       onOpenChange(false);
     } catch (err: any) {
@@ -363,11 +413,48 @@ export function PurchaseInvoiceUploadDialog({ open, onOpenChange, onUploaded, pr
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Upload className="h-5 w-5" />
-            Eingangsrechnung hochladen
+            {gutschrift ? "Lieferantengutschrift hochladen" : "Eingangsrechnung hochladen"}
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
+          {/* Belegart — steht ganz oben, weil sie über das Vorzeichen
+              entscheidet. Der Betrag wird in beiden Fällen positiv eingegeben. */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => { if (gutschrift) belegArtManuell.current = true; update("beleg_art", "rechnung"); }}
+              className={`rounded-lg border-2 p-3 text-left transition-colors ${
+                gutschrift
+                  ? "border-muted-foreground/20 hover:border-muted-foreground/40 hover:bg-muted/30"
+                  : "border-primary bg-primary/5"
+              }`}
+            >
+              <div className="flex items-center gap-2 font-medium text-sm">
+                <FileText className="h-4 w-4" />
+                Rechnung
+              </div>
+              <p className="text-xs text-muted-foreground mt-0.5">Zu zahlen</p>
+            </button>
+            <button
+              type="button"
+              onClick={() => { if (!gutschrift) belegArtManuell.current = true; update("beleg_art", "gutschrift"); }}
+              className={`rounded-lg border-2 p-3 text-left transition-colors ${
+                gutschrift
+                  ? "border-purple-500 bg-purple-50"
+                  : "border-muted-foreground/20 hover:border-muted-foreground/40 hover:bg-muted/30"
+              }`}
+            >
+              <div className={`flex items-center gap-2 font-medium text-sm ${gutschrift ? "text-purple-800" : ""}`}>
+                <Undo2 className="h-4 w-4" />
+                Gutschrift
+              </div>
+              <p className={`text-xs mt-0.5 ${gutschrift ? "text-purple-700" : "text-muted-foreground"}`}>
+                Wird abgezogen
+              </p>
+            </button>
+          </div>
+
           {/* Dropzone */}
           <div
             onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
@@ -390,6 +477,20 @@ export function PurchaseInvoiceUploadDialog({ open, onOpenChange, onUploaded, pr
               onChange={(e) => e.target.files && handleFiles(e.target.files)}
             />
           </div>
+
+          {/* Mehrere Dateien = mehrere eigenständige Belege, alle mit den
+              Daten aus dem Formular unten. Die KI liest immer nur eine Datei
+              (die erste der zuletzt hinzugefügten). Ohne diesen Hinweis wird
+              derselbe Betrag unbemerkt mehrfach gebucht — bei einer Gutschrift
+              auch mehrfach abgezogen. */}
+          {files.length > 1 && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+              <span className="font-medium">{files.length} Dateien ausgewählt.</span>{" "}
+              Daraus werden {files.length} eigene {gutschrift ? "Gutschriften" : "Belege"} — jede mit
+              dem Betrag aus dem Formular unten. Für unterschiedliche Beträge bitte einzeln hochladen;
+              mehrere Seiten eines Belegs vorher zu einer PDF zusammenfassen.
+            </div>
+          )}
 
           {/* File list */}
           {files.length > 0 && (
@@ -455,15 +556,15 @@ export function PurchaseInvoiceUploadDialog({ open, onOpenChange, onUploaded, pr
               <Input value={form.lieferant} onChange={e => update("lieferant", e.target.value)} placeholder="z.B. Hornbach" />
             </div>
             <div>
-              <Label>Rechnungsnummer</Label>
+              <Label>{gutschrift ? "Gutschrift-Nummer" : "Rechnungsnummer"}</Label>
               <Input value={form.rechnungsnummer} onChange={e => update("rechnungsnummer", e.target.value)} />
             </div>
             <div>
-              <Label>Rechnungsdatum</Label>
+              <Label>{gutschrift ? "Gutschriftdatum" : "Rechnungsdatum"}</Label>
               <Input type="date" value={form.rechnungsdatum} onChange={e => update("rechnungsdatum", e.target.value)} />
             </div>
             <div>
-              <Label>Betrag Brutto * (€)</Label>
+              <Label>{gutschrift ? "Gutschriftbetrag Brutto * (€)" : "Betrag Brutto * (€)"}</Label>
               <Input
                 type="number"
                 step="0.01"
@@ -473,6 +574,11 @@ export function PurchaseInvoiceUploadDialog({ open, onOpenChange, onUploaded, pr
                   update("betrag_netto", calcNetto(e.target.value, form.ust_satz));
                 }}
               />
+              {gutschrift && (
+                <p className="text-[11px] text-purple-700 mt-1">
+                  Positiv eingeben — der Betrag wird automatisch abgezogen.
+                </p>
+              )}
             </div>
             <div>
               <Label>USt-Satz (%)</Label>
@@ -514,7 +620,10 @@ export function PurchaseInvoiceUploadDialog({ open, onOpenChange, onUploaded, pr
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="offen">Offen</SelectItem>
-                  <SelectItem value="bezahlt">Bezahlt</SelectItem>
+                  {/* Bei einer Gutschrift bezahlt man nichts — sie ist
+                      ausgeglichen, sobald sie verrechnet oder erstattet wurde.
+                      Gespeichert wird weiterhin derselbe Status-Wert. */}
+                  <SelectItem value="bezahlt">{gutschrift ? "Ausgeglichen" : "Bezahlt"}</SelectItem>
                   <SelectItem value="abgelehnt">Abgelehnt</SelectItem>
                 </SelectContent>
               </Select>

@@ -19,6 +19,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { supabase } from "@/integrations/supabase/client";
 import { useConfigOptions } from "@/hooks/useConfigOptions";
 import { useProjectStatuses } from "@/hooks/useProjectStatuses";
+import { istGutschrift, summeBrutto, formatBetrag, formatBelegBrutto } from "@/lib/purchaseInvoiceAmounts";
 import { Badge } from "@/components/ui/badge";
 
 type DocumentCategory = {
@@ -81,7 +82,7 @@ const ProjectOverview = () => {
   const [protokollCount, setProtokollCount] = useState(0);
   const [projectProtokolle, setProjectProtokolle] = useState<{ id: string; nummer: string | null; datum: string; typ: string | null; ort: string | null; kind: "protokoll" | "ersttermin"; linked?: boolean }[]>([]);
   const [regiePdfs, setRegiePdfs] = useState<{id: string; datum: string; kunde_name: string; pdf_path: string}[]>([]);
-  const [purchaseInvoices, setPurchaseInvoices] = useState<{id: string; lieferant: string; rechnungsdatum: string | null; betrag_brutto: number; status: string; kategorie: string | null}[]>([]);
+  const [purchaseInvoices, setPurchaseInvoices] = useState<{id: string; lieferant: string; rechnungsdatum: string | null; betrag_brutto: number; status: string; kategorie: string | null; beleg_art?: string | null}[]>([]);
   const [projectData, setProjectData] = useState<any>(null);
   const [projectHours, setProjectHours] = useState<{user_id: string, name: string, total: number}[]>([]);
   const [angebotPositionen, setAngebotPositionen] = useState<{position: number; beschreibung: string; menge: number; einheit: string}[]>([]);
@@ -461,10 +462,18 @@ const ProjectOverview = () => {
 
     // Fetch Eingangsrechnungen for this project
     supabase.from("purchase_invoices")
-      .select("id, lieferant, rechnungsdatum, betrag_brutto, status, kategorie")
+      .select("id, lieferant, rechnungsdatum, betrag_brutto, status, kategorie, beleg_art")
       .eq("project_id", projectId)
       .order("rechnungsdatum", { ascending: false, nullsFirst: false })
-      .then(({ data }) => setPurchaseInvoices(data || []));
+      .then(({ data, error }) => {
+        // Fehler nicht verschlucken: sonst verschwindet die Kachel wortlos und
+        // sieht aus, als gäbe es keine Belege zum Projekt.
+        if (error) {
+          toast({ variant: "destructive", title: "Eingangsrechnungen konnten nicht geladen werden", description: error.message });
+          return;
+        }
+        setPurchaseInvoices(data || []);
+      });
 
     // Fetch Protokoll count + Liste (Besprechungsprotokolle + Ersttermine)
     // Ersttermine: direkt verknüpfte (project_id=X) + noch unverknüpfte
@@ -911,7 +920,7 @@ const ProjectOverview = () => {
                     Eingangsrechnungen
                     {purchaseInvoices.length > 0 && (
                       <span className="text-xs text-muted-foreground font-normal">
-                        · € {purchaseInvoices.reduce((s, i) => s + Number(i.betrag_brutto), 0).toFixed(2)}
+                        · {formatBetrag(summeBrutto(purchaseInvoices))}
                       </span>
                     )}
                   </CardTitle>
@@ -932,7 +941,12 @@ const ProjectOverview = () => {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="font-medium truncate">{inv.lieferant}</span>
-                          {inv.status === "bezahlt" && <span className="text-[10px] text-green-600">✓ bezahlt</span>}
+                          {istGutschrift(inv.beleg_art) && (
+                            <span className="text-[10px] font-medium text-purple-700 bg-purple-100 rounded px-1">Gutschrift</span>
+                          )}
+                          {inv.status === "bezahlt" && (
+                            <span className="text-[10px] text-green-600">✓ {istGutschrift(inv.beleg_art) ? "ausgeglichen" : "bezahlt"}</span>
+                          )}
                           {inv.status === "offen" && <span className="text-[10px] text-orange-600">offen</span>}
                         </div>
                         {inv.rechnungsdatum && (
@@ -941,7 +955,9 @@ const ProjectOverview = () => {
                           </div>
                         )}
                       </div>
-                      <span className="text-sm font-medium whitespace-nowrap">€ {Number(inv.betrag_brutto).toFixed(2)}</span>
+                      <span className={`text-sm font-medium whitespace-nowrap ${istGutschrift(inv.beleg_art) ? "text-purple-700" : ""}`}>
+                        {formatBelegBrutto(inv)}
+                      </span>
                     </button>
                   ))}
                   {purchaseInvoices.length > 5 && (

@@ -7,10 +7,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { ExternalLink, Save, Loader2, Receipt, Lock, Search, Check, X } from "lucide-react";
+import { ExternalLink, Save, Loader2, Receipt, Lock, Search, Check, X, Undo2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
+import { istGutschrift } from "@/lib/purchaseInvoiceAmounts";
 
 const FALLBACK_KATEGORIEN = [
   { value: "material", label: "Material" },
@@ -159,16 +160,51 @@ export function PurchaseInvoiceDetailDialog({ invoiceId, onClose, onUpdated }: P
 
   const handleSave = async () => {
     if (!form) return;
+
+    // Ohne diese Prüfung landet man in einer rohen Postgres-Meldung: ein
+    // leeres Feld verletzt NOT NULL, ein eingetipptes Minus den Constraint
+    // betrag_brutto >= 0. Gerade bei Gutschriften liegt das Minus nahe,
+    // weil die Liste den Betrag negativ anzeigt.
+    const brutto = parseFloat(form.betrag_brutto);
+    if (!Number.isFinite(brutto) || brutto <= 0) {
+      toast({
+        variant: "destructive",
+        title: "Betrag prüfen",
+        description: istGutschrift(form.beleg_art)
+          ? "Den Gutschriftbetrag bitte als positive Zahl eintragen — abgezogen wird er automatisch."
+          : "Bitte einen Bruttobetrag größer als 0 eintragen.",
+      });
+      return;
+    }
+    // NUMERIC(12,2) fasst maximal 9.999.999.999,99 — ohne diese Grenze
+    // quittiert Postgres einen Zahlendreher mit "numeric field overflow".
+    if (brutto > 9_999_999_999) {
+      toast({ variant: "destructive", title: "Betrag prüfen", description: "Der Betrag ist unrealistisch hoch — bitte die Eingabe kontrollieren." });
+      return;
+    }
+    const netto = form.betrag_netto === null || form.betrag_netto === "" ? null : parseFloat(form.betrag_netto);
+    if (netto !== null && (!Number.isFinite(netto) || netto < 0)) {
+      toast({ variant: "destructive", title: "Betrag prüfen", description: "Der Nettobetrag muss eine positive Zahl sein." });
+      return;
+    }
+    const ustSatz = form.ust_satz === null || form.ust_satz === undefined || form.ust_satz === "" ? null : parseFloat(form.ust_satz);
+    if (ustSatz !== null && ![0, 10, 13, 20].includes(ustSatz)) {
+      toast({ variant: "destructive", title: "USt-Satz prüfen", description: "Zulässig sind 0, 10, 13 oder 20 Prozent." });
+      return;
+    }
+
     setSaving(true);
     const { error } = await supabase.from("purchase_invoices").update({
       lieferant: form.lieferant,
       rechnungsnummer: form.rechnungsnummer || null,
-      rechnungsdatum: form.rechnungsdatum || null,
+      // rechnungsdatum und beleg_art werden bewusst NICHT mitgeschickt: beide
+      // sind per Trigger gesperrt, und ein abweichender Wert würde das ganze
+      // Update scheitern lassen.
       faellig_am: form.faellig_am || null,
       bezahlt_am: form.bezahlt_am || null,
-      betrag_brutto: parseFloat(form.betrag_brutto),
-      betrag_netto: form.betrag_netto !== null ? parseFloat(form.betrag_netto) : null,
-      ust_satz: form.ust_satz !== null ? parseFloat(form.ust_satz) : null,
+      betrag_brutto: brutto,
+      betrag_netto: netto,
+      ust_satz: ustSatz,
       kategorie: form.kategorie,
       project_id: form.project_id || null,
       status: form.status,
@@ -195,11 +231,24 @@ export function PurchaseInvoiceDetailDialog({ invoiceId, onClose, onUpdated }: P
 
   if (!invoiceId) return null;
 
+  // Die Belegart ist nach dem Anlegen fix (DB-Trigger sperrt sie) — hier nur
+  // Anzeige. Ein Wechsel würde Nummernkreis und Vorzeichen widersprüchlich
+  // machen; dafür ist Löschen + Neuanlegen der richtige Weg.
+  const gutschrift = istGutschrift(form?.beleg_art);
+
   return (
     <Dialog open={!!invoiceId} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Eingangsrechnung bearbeiten</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            {gutschrift ? "Lieferantengutschrift bearbeiten" : "Eingangsrechnung bearbeiten"}
+            {gutschrift && (
+              <Badge className="bg-purple-100 text-purple-800 hover:bg-purple-100">
+                <Undo2 className="h-3 w-3 mr-1" />
+                Gutschrift
+              </Badge>
+            )}
+          </DialogTitle>
         </DialogHeader>
 
         {loading || !form ? (
@@ -239,8 +288,11 @@ export function PurchaseInvoiceDetailDialog({ invoiceId, onClose, onUpdated }: P
                 </div>
                 {form.beleg_locked && (
                   <p className="text-[11px] text-muted-foreground">
-                    Beleg-Datei ist nach dem ersten Upload unveränderbar. Meta-Daten (Betrag, Status,
-                    Notizen) dürfen weiterhin korrigiert werden.
+                    Beleg-Datei ist nach dem ersten Upload unveränderbar. Ebenso festgeschrieben sind
+                    Belegnummer, {gutschrift ? "Gutschriftdatum" : "Rechnungsdatum"} und die Belegart
+                    ({gutschrift ? "Gutschrift" : "Rechnung"}) — eine falsche Belegart lässt sich nur
+                    durch Löschen und Neuanlegen korrigieren. Betrag, Status, Kategorie und Notizen
+                    dürfen weiterhin geändert werden.
                   </p>
                 )}
               </div>
@@ -307,19 +359,31 @@ export function PurchaseInvoiceDetailDialog({ invoiceId, onClose, onUpdated }: P
                 <Input value={form.lieferant || ""} onChange={e => update("lieferant", e.target.value)} />
               </div>
               <div>
-                <Label>Rechnungsnummer</Label>
+                <Label>{gutschrift ? "Gutschrift-Nummer" : "Rechnungsnummer"}</Label>
                 <Input value={form.rechnungsnummer || ""} onChange={e => update("rechnungsnummer", e.target.value)} />
               </div>
               <div>
-                <Label>Rechnungsdatum</Label>
-                <Input type="date" value={form.rechnungsdatum || ""} onChange={e => update("rechnungsdatum", e.target.value)} />
+                <Label className="flex items-center gap-1">
+                  {gutschrift ? "Gutschriftdatum" : "Rechnungsdatum"}
+                  <Lock className="h-3 w-3 text-muted-foreground" />
+                </Label>
+                {/* Das Datum ist wie die Belegnummer per DB-Trigger gesperrt
+                    (finanzamtskonform). Vorher war das Feld frei editierbar —
+                    beim Speichern warf der Trigger, und dabei gingen ALLE
+                    anderen Korrekturen desselben Vorgangs mit verloren. */}
+                <Input type="date" value={form.rechnungsdatum || ""} readOnly className="bg-muted" />
               </div>
               <div>
-                <Label>Betrag Brutto * (€)</Label>
+                <Label>{gutschrift ? "Gutschriftbetrag Brutto * (€)" : "Betrag Brutto * (€)"}</Label>
                 <Input type="number" step="0.01" value={form.betrag_brutto || ""} onChange={e => update("betrag_brutto", e.target.value)} />
+                {gutschrift && (
+                  <p className="text-[11px] text-purple-700 mt-1">
+                    Positiv eingeben — abgezogen wird automatisch.
+                  </p>
+                )}
               </div>
               <div>
-                <Label>Betrag Netto (€)</Label>
+                <Label>{gutschrift ? "Gutschriftbetrag Netto (€)" : "Betrag Netto (€)"}</Label>
                 <Input type="number" step="0.01" value={form.betrag_netto || ""} onChange={e => update("betrag_netto", e.target.value)} />
               </div>
               <div>
@@ -369,7 +433,7 @@ export function PurchaseInvoiceDetailDialog({ invoiceId, onClose, onUpdated }: P
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="offen">Offen</SelectItem>
-                    <SelectItem value="bezahlt">Bezahlt</SelectItem>
+                    <SelectItem value="bezahlt">{gutschrift ? "Ausgeglichen" : "Bezahlt"}</SelectItem>
                     <SelectItem value="abgelehnt">Abgelehnt</SelectItem>
                   </SelectContent>
                 </Select>
@@ -379,7 +443,7 @@ export function PurchaseInvoiceDetailDialog({ invoiceId, onClose, onUpdated }: P
                 <Input type="date" value={form.faellig_am || ""} onChange={e => update("faellig_am", e.target.value)} />
               </div>
               <div>
-                <Label>Bezahlt am</Label>
+                <Label>{gutschrift ? "Ausgeglichen am" : "Bezahlt am"}</Label>
                 <Input type="date" value={form.bezahlt_am || ""} onChange={e => update("bezahlt_am", e.target.value)} />
               </div>
               <div>

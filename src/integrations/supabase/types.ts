@@ -3187,6 +3187,7 @@ export type Database = {
       }
       purchase_invoices: {
         Row: {
+          beleg_art: string
           beleg_locked: boolean | null
           betrag_brutto: number
           betrag_netto: number | null
@@ -3213,6 +3214,7 @@ export type Database = {
           zahlungsart: string | null
         }
         Insert: {
+          beleg_art?: string
           beleg_locked?: boolean | null
           betrag_brutto: number
           betrag_netto?: number | null
@@ -3239,6 +3241,7 @@ export type Database = {
           zahlungsart?: string | null
         }
         Update: {
+          beleg_art?: string
           beleg_locked?: boolean | null
           betrag_brutto?: number
           betrag_netto?: number | null

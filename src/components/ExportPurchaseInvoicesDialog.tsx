@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Download, Loader2, FileSpreadsheet } from "lucide-react";
+import { belegArtLabel, vorzeichenBrutto, vorzeichenNetto } from "@/lib/purchaseInvoiceAmounts";
 
 interface Props {
   open: boolean;
@@ -49,7 +50,7 @@ export function ExportPurchaseInvoicesDialog({ open, onClose }: Props) {
     try {
       let q = supabase
         .from("purchase_invoices")
-        .select("nummer, lieferant, rechnungsnummer, rechnungsdatum, faellig_am, bezahlt_am, betrag_netto, betrag_brutto, ust_satz, kategorie, status, zahlungsart, notizen, pdf_path, projects(name)")
+        .select("nummer, beleg_art, lieferant, rechnungsnummer, rechnungsdatum, faellig_am, bezahlt_am, betrag_netto, betrag_brutto, ust_satz, kategorie, status, zahlungsart, notizen, pdf_path, projects(name)")
         .order("rechnungsdatum", { ascending: true, nullsFirst: false })
         .order("nummer", { ascending: true });
 
@@ -70,7 +71,7 @@ export function ExportPurchaseInvoicesDialog({ open, onClose }: Props) {
       const { data, error } = await q;
       if (error) throw error;
       const rows = (data || []) as unknown as Array<{
-        nummer: string | null; lieferant: string; rechnungsnummer: string | null;
+        nummer: string | null; beleg_art: string | null; lieferant: string; rechnungsnummer: string | null;
         rechnungsdatum: string | null; faellig_am: string | null; bezahlt_am: string | null;
         betrag_netto: number | null; betrag_brutto: number; ust_satz: number | null;
         kategorie: string | null; status: string | null; zahlungsart: string | null;
@@ -85,17 +86,20 @@ export function ExportPurchaseInvoicesDialog({ open, onClose }: Props) {
 
       const fmtDate = (iso: string | null) => iso ? new Date(`${iso}T12:00:00`).toLocaleDateString("de-AT") : "";
       const aoa: (string | number | null)[][] = [
-        ["Nr.", "Datum", "Fällig", "Bezahlt", "Lieferant", "Rechnungs-Nr.", "Netto", "MwSt %", "Brutto", "Kategorie", "Status", "Zahlung", "Projekt", "PDF", "Notiz"],
+        ["Nr.", "Art", "Datum", "Fällig", "Bezahlt", "Lieferant", "Rechnungs-Nr.", "Netto", "MwSt %", "Brutto", "Kategorie", "Status", "Zahlung", "Projekt", "PDF", "Notiz"],
       ];
       let sumNetto = 0;
       let sumBrutto = 0;
       for (const r of rows) {
-        const netto = Number(r.betrag_netto || 0);
-        const brutto = Number(r.betrag_brutto || 0);
+        // Gutschriften werden mit negativem Vorzeichen exportiert, damit die
+        // Summenzeile unten die tatsächliche Belastung zeigt.
+        const netto = vorzeichenNetto(r);
+        const brutto = vorzeichenBrutto(r);
         sumNetto += netto;
         sumBrutto += brutto;
         aoa.push([
           r.nummer || "",
+          belegArtLabel(r.beleg_art),
           fmtDate(r.rechnungsdatum),
           fmtDate(r.faellig_am),
           fmtDate(r.bezahlt_am),
@@ -113,7 +117,7 @@ export function ExportPurchaseInvoicesDialog({ open, onClose }: Props) {
         ]);
       }
       aoa.push([]);
-      aoa.push(["", "", "", "", "", "Summe:", Math.round(sumNetto * 100) / 100, "", Math.round(sumBrutto * 100) / 100, "", "", "", "", "", ""]);
+      aoa.push(["", "", "", "", "", "", "Summe:", Math.round(sumNetto * 100) / 100, "", Math.round(sumBrutto * 100) / 100, "", "", "", "", "", ""]);
 
       // xlsx dynamisch importieren (großes Bundle)
       const XLSX = await import("xlsx");
@@ -121,6 +125,7 @@ export function ExportPurchaseInvoicesDialog({ open, onClose }: Props) {
       // Spaltenbreiten
       ws["!cols"] = [
         { wch: 14 }, // Nr
+        { wch: 10 }, // Art
         { wch: 12 }, // Datum
         { wch: 12 }, // Fällig
         { wch: 12 }, // Bezahlt

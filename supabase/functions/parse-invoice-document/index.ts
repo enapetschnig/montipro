@@ -40,6 +40,7 @@ Deine Aufgabe: exakte Werte aus dem Rechnungsbild extrahieren.
 GIB NUR JSON ZURÜCK (kein Markdown, keine Erklärung), genau in diesem Schema:
 
 {
+  "beleg_art": "rechnung" | "gutschrift",
   "lieferant": string,
   "rechnungsnummer": string | null,
   "rechnungsdatum": string | null,  // YYYY-MM-DD
@@ -51,6 +52,20 @@ GIB NUR JSON ZURÜCK (kein Markdown, keine Erklärung), genau in diesem Schema:
   "kategorie": ${kategorieEnum},
   "notizen": string | null
 }
+
+══════════════════════════════════════════════════════════════
+RECHNUNG ODER GUTSCHRIFT?
+══════════════════════════════════════════════════════════════
+- "gutschrift", wenn das Dokument überschrieben ist mit: "Gutschrift",
+  "Lieferantengutschrift", "Rechnungskorrektur", "Korrekturrechnung",
+  "Stornorechnung", "Storno", "Retoure", "Rückvergütung", "Credit Note".
+- "gutschrift" auch dann, wenn der Endbetrag negativ ausgewiesen ist
+  (z.B. "-360,00" oder "360,00 -") oder wenn steht, dass der Betrag dem
+  Kunden gutgeschrieben / erstattet / rückvergütet wird.
+- Sonst immer "rechnung".
+- WICHTIG: betrag_brutto und betrag_netto IMMER als POSITIVE Zahl
+  zurückgeben, auch bei einer Gutschrift. Das Vorzeichen ergibt sich
+  allein aus beleg_art.
 
 ══════════════════════════════════════════════════════════════
 KRITISCHE REGELN FÜR BRUTTO-BETRAG (absolut wichtig):
@@ -118,6 +133,20 @@ function parseEuroAmount(value: unknown): number | null {
   if (typeof value !== "string") return null;
   let s = value.trim().replace(/[€$\s]/g, "").replace(/EUR/gi, "");
   if (!s) return null;
+  // Nachgestelltes Minus ("360,00-"), wie es Warenwirtschaftssysteme auf
+  // Gutschriften drucken. Ohne diese Zeile wird daraus NaN und der Betrag
+  // geht ganz verloren — samt dem Hinweis, dass es eine Gutschrift ist.
+  let nachgestelltesMinus = false;
+  if (/[-−]$/.test(s)) {
+    nachgestelltesMinus = true;
+    s = s.slice(0, -1);
+    // Nach dem Abschneiden erneut prüfen: aus "-" wird sonst ein leerer
+    // String, und Number("") ist 0 — ein "-" im Feld gilt aber als "nicht
+    // erkannt" und muss null bleiben.
+    if (!s) return null;
+  }
+  // Typografisches Minus (U+2212) auf ASCII normalisieren.
+  s = s.replace(/^−/, "-");
   const hasComma = s.includes(",");
   const hasDot = s.includes(".");
   if (hasComma && hasDot) {
@@ -134,11 +163,13 @@ function parseEuroAmount(value: unknown): number | null {
     s = s.replace(/\./g, "").replace(",", ".");
   }
   const n = Number(s);
-  return isFinite(n) ? n : null;
+  if (!isFinite(n)) return null;
+  return nachgestelltesMinus ? -Math.abs(n) : n;
 }
 
 /** Validiert und korrigiert das Rechnungsobjekt aus GPT. */
 function validateInvoice(raw: any): {
+  beleg_art: "rechnung" | "gutschrift";
   lieferant: string;
   rechnungsnummer: string | null;
   rechnungsdatum: string | null;
@@ -189,6 +220,19 @@ function validateInvoice(raw: any): {
     netto = Math.round((brutto / (1 + ustSatz / 100)) * 100) / 100;
   }
 
+  // Belegart: was GPT meldet, plus die Vorzeichen-Heuristik. Ein negativ
+  // ausgewiesener Endbetrag ist praktisch immer eine Gutschrift/Korrektur —
+  // eine Rechnung über einen negativen Betrag gibt es nicht.
+  const negativerBetrag = (brutto != null && brutto < 0) || (netto != null && netto < 0);
+  const gemeldeteArt = typeof raw?.beleg_art === "string" ? raw.beleg_art.trim().toLowerCase() : "";
+  const beleg_art: "rechnung" | "gutschrift" =
+    gemeldeteArt === "gutschrift" || negativerBetrag ? "gutschrift" : "rechnung";
+  if (negativerBetrag && gemeldeteArt !== "gutschrift") {
+    warnings.push("Negativer Betrag erkannt → als Gutschrift eingestuft, bitte prüfen.");
+  }
+
+  // Beträge immer positiv weitergeben — das Minus entsteht in der App über
+  // die Belegart, nicht über einen negativ gespeicherten Betrag.
   if (brutto != null && brutto < 0) brutto = Math.abs(brutto);
   if (netto != null && netto < 0) netto = Math.abs(netto);
 
@@ -206,6 +250,7 @@ function validateInvoice(raw: any): {
     : null;
 
   return {
+    beleg_art,
     lieferant,
     rechnungsnummer,
     rechnungsdatum,
@@ -392,7 +437,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
                 (!validated.betrag_brutto && v2.betrag_brutto) ||
                 (v2.betrag_brutto && validated.betrag_brutto && v2.betrag_brutto > validated.betrag_brutto && v2.warnings.length === 0)
               ) {
+                // Eine im ersten Durchgang erkannte Gutschrift bleibt bestehen:
+                // Der zweite Durchgang korrigiert Beträge, die Belegart ergibt
+                // sich aber aus der Überschrift des Dokuments. Eine übersehene
+                // Gutschrift würde alle Summen verfälschen; eine zu viel
+                // erkannte fällt im Dialog sofort auf.
+                const artErsterDurchgang = validated.beleg_art;
                 validated = v2;
+                if (artErsterDurchgang === "gutschrift") validated.beleg_art = "gutschrift";
               }
             } catch { /* keep first result */ }
           }

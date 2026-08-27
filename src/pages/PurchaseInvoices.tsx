@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Upload, FileText, Image as ImageIcon, Search, Filter, Trash2, Download, Euro, Calendar, Building2, CheckCircle2, Clock as ClockIcon, XCircle, Camera, Receipt, Lock, FileSpreadsheet } from "lucide-react";
+import { ArrowLeft, Upload, FileText, Image as ImageIcon, Search, Filter, Trash2, Download, Euro, Calendar, Building2, CheckCircle2, Clock as ClockIcon, XCircle, Camera, Receipt, Lock, FileSpreadsheet, Undo2 } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,9 +14,11 @@ import { useToast } from "@/hooks/use-toast";
 import { PurchaseInvoiceUploadDialog } from "@/components/PurchaseInvoiceUploadDialog";
 import { PurchaseInvoiceDetailDialog } from "@/components/PurchaseInvoiceDetailDialog";
 import { ExportPurchaseInvoicesDialog } from "@/components/ExportPurchaseInvoicesDialog";
+import { istGutschrift, summeBrutto, formatBetrag, formatBelegBrutto, vorzeichenNetto } from "@/lib/purchaseInvoiceAmounts";
 
 type PurchaseInvoice = {
   id: string;
+  beleg_art?: string | null;
   project_id: string | null;
   nummer: string | null;
   lieferant: string;
@@ -130,6 +132,10 @@ export default function PurchaseInvoices() {
     return invoices.filter(inv => {
       if (statusFilter === "verrechnet") {
         if (!inv.verrechnet_am) return false;
+      } else if (statusFilter === "gutschrift") {
+        if (!istGutschrift(inv.beleg_art)) return false;
+      } else if (statusFilter === "nur_rechnungen") {
+        if (istGutschrift(inv.beleg_art)) return false;
       } else if (statusFilter !== "alle") {
         if (inv.status !== statusFilter) return false;
       }
@@ -151,18 +157,21 @@ export default function PurchaseInvoices() {
     const offen = filtered.filter(i => i.status === "offen" && !i.verrechnet_am);
     const bezahlt = filtered.filter(i => i.status === "bezahlt");
     const verrechnet = filtered.filter(i => i.verrechnet_am);
-    const offenSumme = offen.reduce((s, i) => s + Number(i.betrag_brutto), 0);
-    const bezahltSumme = bezahlt.reduce((s, i) => s + Number(i.betrag_brutto), 0);
-    const verrechnetSumme = verrechnet.reduce((s, i) => s + Number(i.betrag_brutto), 0);
-    const gesamt = filtered.reduce((s, i) => s + Number(i.betrag_brutto), 0);
+    const gutschriften = filtered.filter(i => istGutschrift(i.beleg_art));
+    // Alle Summen laufen über summeBrutto — dort werden Gutschriften
+    // abgezogen statt addiert.
     return {
       offen: offen.length,
       bezahlt: bezahlt.length,
       verrechnet: verrechnet.length,
-      offenSumme,
-      bezahltSumme,
-      verrechnetSumme,
-      gesamt,
+      gutschriften: gutschriften.length,
+      offenSumme: summeBrutto(offen),
+      bezahltSumme: summeBrutto(bezahlt),
+      verrechnetSumme: summeBrutto(verrechnet),
+      // Gutschrift-Kachel zeigt den Entlastungsbetrag als positive Zahl —
+      // "€ 360.00 gutgeschrieben" liest sich klarer als "− € 360.00".
+      gutschriftenSumme: Math.abs(summeBrutto(gutschriften)),
+      gesamt: summeBrutto(filtered),
       count: filtered.length,
     };
   }, [filtered]);
@@ -212,8 +221,13 @@ export default function PurchaseInvoices() {
 
   const statusBadge = (inv: PurchaseInvoice) => {
     const status = inv.status;
+    const gutschrift = istGutschrift(inv.beleg_art);
     const nodes: React.ReactNode[] = [];
-    if (status === "bezahlt") nodes.push(<Badge key="bez" className="bg-green-100 text-green-800 hover:bg-green-100"><CheckCircle2 className="h-3 w-3 mr-1" />Bezahlt</Badge>);
+    // Die Belegart steht vorn — sie ist die wichtigste Unterscheidung.
+    if (gutschrift) {
+      nodes.push(<Badge key="gs" className="bg-purple-100 text-purple-800 hover:bg-purple-100"><Undo2 className="h-3 w-3 mr-1" />Gutschrift</Badge>);
+    }
+    if (status === "bezahlt") nodes.push(<Badge key="bez" className="bg-green-100 text-green-800 hover:bg-green-100"><CheckCircle2 className="h-3 w-3 mr-1" />{gutschrift ? "Ausgeglichen" : "Bezahlt"}</Badge>);
     else if (status === "abgelehnt") nodes.push(<Badge key="ab" variant="destructive"><XCircle className="h-3 w-3 mr-1" />Abgelehnt</Badge>);
     else nodes.push(<Badge key="of" variant="outline" className="text-orange-700 border-orange-300"><ClockIcon className="h-3 w-3 mr-1" />Offen</Badge>);
     if (inv.verrechnet_am) {
@@ -267,36 +281,49 @@ export default function PurchaseInvoices() {
       </header>
 
       <main className="container mx-auto px-4 py-4 space-y-4">
-        {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {/* Stats — Gutschrift-Kachel erscheint nur, wenn es welche gibt */}
+        <div className={`grid grid-cols-2 gap-3 ${stats.gutschriften > 0 ? "md:grid-cols-5" : "md:grid-cols-4"}`}>
           <Card>
             <CardContent className="p-3">
               <p className="text-xs text-muted-foreground">Gesamt</p>
               <p className="text-xl font-bold">{stats.count}</p>
-              <p className="text-xs text-muted-foreground">€ {stats.gesamt.toFixed(2)}</p>
+              <p className="text-xs text-muted-foreground">{formatBetrag(stats.gesamt)}</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-3">
               <p className="text-xs text-muted-foreground">Offen</p>
               <p className="text-xl font-bold text-orange-600">{stats.offen}</p>
-              <p className="text-xs text-orange-600">€ {stats.offenSumme.toFixed(2)}</p>
+              <p className="text-xs text-orange-600">{formatBetrag(stats.offenSumme)}</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-3">
               <p className="text-xs text-muted-foreground">Bezahlt</p>
               <p className="text-xl font-bold text-green-600">{stats.bezahlt}</p>
-              <p className="text-xs text-green-600">€ {stats.bezahltSumme.toFixed(2)}</p>
+              <p className="text-xs text-green-600">{formatBetrag(stats.bezahltSumme)}</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-3">
               <p className="text-xs text-muted-foreground">Verrechnet</p>
               <p className="text-xl font-bold text-blue-600">{stats.verrechnet}</p>
-              <p className="text-xs text-blue-600">€ {stats.verrechnetSumme.toFixed(2)}</p>
+              <p className="text-xs text-blue-600">{formatBetrag(stats.verrechnetSumme)}</p>
             </CardContent>
           </Card>
+          {stats.gutschriften > 0 && (
+            <Card>
+              <CardContent className="p-3">
+                {/* "davon" ist wichtig: der Betrag ist in den anderen Kacheln
+                    bereits abgezogen. Ohne das Wort rechnet man ihn ein
+                    zweites Mal herunter. */}
+                <p className="text-xs text-muted-foreground">davon Gutschriften</p>
+                <p className="text-xl font-bold text-purple-600">{stats.gutschriften}</p>
+                <p className="text-xs text-purple-600">{formatBetrag(-stats.gutschriftenSumme)}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">bereits abgezogen</p>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* Filters */}
@@ -326,6 +353,11 @@ export default function PurchaseInvoices() {
                 <SelectItem value="bezahlt">Bezahlt</SelectItem>
                 <SelectItem value="verrechnet">Verrechnet</SelectItem>
                 <SelectItem value="abgelehnt">Abgelehnt</SelectItem>
+                {/* Belegart statt Status — bewusst im selben Auswahlfeld, damit
+                    die Filterzeile schmal bleibt. Beide Richtungen anbieten,
+                    sonst kommt man aus "Nur Gutschriften" nur über "Alle" zurück. */}
+                <SelectItem value="gutschrift">Nur Gutschriften</SelectItem>
+                <SelectItem value="nur_rechnungen">Nur Rechnungen</SelectItem>
               </SelectContent>
             </Select>
             <Select value={kategorieFilter} onValueChange={setKategorieFilter}>
@@ -348,7 +380,7 @@ export default function PurchaseInvoices() {
             <CardContent className="py-10 text-center">
               <Upload className="h-10 w-10 mx-auto text-muted-foreground mb-2" />
               <p className="text-muted-foreground mb-3">
-                {invoices.length === 0 ? "Noch keine Eingangsrechnungen hochgeladen" : "Keine Rechnungen gefunden"}
+                {invoices.length === 0 ? "Noch keine Eingangsrechnungen hochgeladen" : "Keine Belege gefunden"}
               </p>
               {invoices.length === 0 && (
                 <Button onClick={() => setUploadOpen(true)} className="gap-2">
@@ -416,12 +448,12 @@ export default function PurchaseInvoices() {
                     {/* Amount + actions */}
                     <div className="flex items-center gap-2 shrink-0">
                       <div className="text-right">
-                        <p className="font-semibold whitespace-nowrap">
-                          € {Number(inv.betrag_brutto).toFixed(2)}
+                        <p className={`font-semibold whitespace-nowrap ${istGutschrift(inv.beleg_art) ? "text-purple-700" : ""}`}>
+                          {formatBelegBrutto(inv)}
                         </p>
                         {inv.betrag_netto !== null && (
                           <p className="text-[10px] text-muted-foreground whitespace-nowrap">
-                            netto € {Number(inv.betrag_netto).toFixed(2)}
+                            netto {formatBetrag(vorzeichenNetto(inv))}
                           </p>
                         )}
                       </div>
@@ -430,7 +462,9 @@ export default function PurchaseInvoices() {
                         size="icon"
                         className="h-8 w-8"
                         onClick={(e) => { e.stopPropagation(); toggleBezahlt(inv); }}
-                        title={inv.status === "bezahlt" ? "Als offen markieren" : "Als bezahlt markieren"}
+                        title={inv.status === "bezahlt"
+                          ? "Als offen markieren"
+                          : istGutschrift(inv.beleg_art) ? "Als ausgeglichen markieren" : "Als bezahlt markieren"}
                       >
                         <CheckCircle2 className={`h-4 w-4 ${inv.status === "bezahlt" ? "text-green-600" : "text-muted-foreground"}`} />
                       </Button>
@@ -486,7 +520,9 @@ export default function PurchaseInvoices() {
       <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Rechnung löschen?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {istGutschrift(invoices.find(i => i.id === deleteId)?.beleg_art) ? "Gutschrift löschen?" : "Rechnung löschen?"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
               Die Datei und alle Daten werden unwiederbringlich gelöscht.
             </AlertDialogDescription>
