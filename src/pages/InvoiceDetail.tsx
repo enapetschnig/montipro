@@ -15,6 +15,8 @@ import { Plus, Trash2, Save, Download, Copy, ArrowRightLeft, AlertTriangle, Pack
 import { InvoicePdfPreview } from "@/components/InvoicePdfPreview";
 import { SendEmailDialog } from "@/components/SendEmailDialog";
 import { InvoiceAttachmentsCard } from "@/components/InvoiceAttachmentsCard";
+import { LangtextFeld } from "@/components/LangtextFeld";
+import { alsText } from "@/lib/richText";
 import { zumBeilegen, type InvoiceAttachment } from "@/lib/invoiceAttachments";
 import { ImportMaterialsDialog } from "@/components/ImportMaterialsDialog";
 import { ImportFromProjectDialog } from "@/components/ImportFromProjectDialog";
@@ -974,7 +976,7 @@ export default function InvoiceDetail() {
         position: 1,
         beschreibung: (t as any).kurzbezeichnung || t.name,
         kurztext: (t as any).kurzbezeichnung || t.name,
-        langtext: ((t as any).langbezeichnung && (t as any).langbezeichnung !== ((t as any).kurzbezeichnung || t.name))
+        langtext: ((t as any).langbezeichnung && alsText((t as any).langbezeichnung) !== ((t as any).kurzbezeichnung || t.name))
           ? (t as any).langbezeichnung
           : "",
         menge: setMenge,
@@ -1003,7 +1005,7 @@ export default function InvoiceDetail() {
       position: 1,
       beschreibung: (t as any).kurzbezeichnung || t.name || t.beschreibung,
       kurztext: (t as any).kurzbezeichnung || t.name,
-      langtext: ((t as any).langbezeichnung && (t as any).langbezeichnung !== ((t as any).kurzbezeichnung || t.name)) ? (t as any).langbezeichnung : "",
+      langtext: ((t as any).langbezeichnung && alsText((t as any).langbezeichnung) !== ((t as any).kurzbezeichnung || t.name)) ? (t as any).langbezeichnung : "",
       menge: 1,
       einheit: t.einheit,
       einzelpreis: netto,
@@ -3873,7 +3875,7 @@ export default function InvoiceDetail() {
                       const acResults = acQuery ? templates.filter(t => {
                         const kb = ((t as any).kurzbezeichnung || t.name || "").toLowerCase();
                         const pn = ((t as any).produktnummer || "").toLowerCase();
-                        const lb = ((t as any).langbezeichnung || t.beschreibung || "").toLowerCase();
+                        const lb = alsText((t as any).langbezeichnung || t.beschreibung || "").toLowerCase();
                         const pg = ((t as any).produktgruppe || "").toLowerCase();
                         return kb.includes(acQuery) || pn.includes(acQuery) || lb.includes(acQuery) || pg.includes(acQuery);
                       }).slice(0, 20) : [];
@@ -3921,8 +3923,10 @@ export default function InvoiceDetail() {
                                       updateItem(idx, "kurztext", (t as any).kurzbezeichnung || t.name);
                                       const lang = (t as any).langbezeichnung || "";
                                       const kurz = (t as any).kurzbezeichnung || t.name || "";
-                                      // Langtext nur setzen wenn es eine echte Langbezeichnung gibt und sie sich vom Kurztext unterscheidet
-                                      updateItem(idx, "langtext", lang && lang !== kurz ? lang : "");
+                                      // Langtext nur setzen, wenn es eine echte Langbezeichnung gibt und
+                                      // sie sich vom Kurztext unterscheidet — verglichen wird der reine
+                                      // Text, weil formatierter Langtext sonst nie als gleich gilt.
+                                      updateItem(idx, "langtext", lang && alsText(lang) !== kurz ? lang : "");
                                       updateItem(idx, "einheit", t.einheit);
                                       updateItem(idx, "einzelpreis", netto);
                                       updateItem(idx, "produktnummer", (t as any).produktnummer || "");
@@ -3943,18 +3947,11 @@ export default function InvoiceDetail() {
                             <span className="text-[10px] text-muted-foreground mt-0.5 block">Prod.-Nr: {item.produktnummer}</span>
                           )}
                           {(item.langtext || !isLocked) && (
-                            <textarea
-                              value={item.langtext || ""}
-                              onChange={(e) => {
-                                updateItem(idx, "langtext", e.target.value);
-                                e.target.style.height = "auto";
-                                e.target.style.height = e.target.scrollHeight + "px";
-                              }}
-                              onFocus={(e) => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
+                            <LangtextFeld
+                              wert={item.langtext || ""}
+                              onChange={(v) => updateItem(idx, "langtext", v)}
+                              disabled={isLocked}
                               placeholder="Langtext / Details (optional, wird auf PDF angezeigt)"
-                              className="mt-1 w-full text-xs border rounded px-2 py-1 resize-none bg-muted/30"
-                              style={{ minHeight: "28px", height: item.langtext ? "auto" : "28px" }}
-                              rows={item.langtext ? Math.max(2, item.langtext.split("\n").length) : 1}
                             />
                           )}
                         </TableCell>
@@ -4304,7 +4301,7 @@ export default function InvoiceDetail() {
                             </Badge>
                           )}
                         </p>
-                        {(t as any).langbezeichnung && <p className="text-xs text-muted-foreground truncate">{(t as any).langbezeichnung}</p>}
+                        {(t as any).langbezeichnung && <p className="text-xs text-muted-foreground truncate">{alsText((t as any).langbezeichnung)}</p>}
                       </div>
                       {isSelected && (
                         <Input
@@ -4361,7 +4358,15 @@ export default function InvoiceDetail() {
                       position: 1,
                       beschreibung: (t as any).kurzbezeichnung || t.name || t.beschreibung,
                       kurztext: (t as any).kurzbezeichnung || t.name,
-                      langtext: (t as any).langbezeichnung || t.beschreibung || "",
+                      // Wie an den anderen Übernahmestellen: nur setzen, wenn sich der
+                      // Langtext vom Kurztext unterscheidet. Der Rückfall auf
+                      // beschreibung bleibt für Materialien ohne Langbezeichnung
+                      // (so legt sie der Datei-Import an).
+                      langtext: (() => {
+                        const kurz = (t as any).kurzbezeichnung || t.name || "";
+                        const lang = (t as any).langbezeichnung || t.beschreibung || "";
+                        return lang && alsText(lang) !== kurz ? lang : "";
+                      })(),
                       menge,
                       einheit: t.einheit,
                       einzelpreis: netto,

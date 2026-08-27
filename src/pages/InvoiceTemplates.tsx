@@ -16,6 +16,8 @@ import { useEinheiten } from "@/hooks/useEinheiten";
 import { Checkbox } from "@/components/ui/checkbox";
 import { MaterialSetEditor, type SetComponent } from "@/components/MaterialSetEditor";
 import { BulkPriceDialog } from "@/components/BulkPriceDialog";
+import { RichTextEditor } from "@/components/ui/rich-text-editor";
+import { alsText, textZuHtml, normalisiere } from "@/lib/richText";
 import {
   Dialog,
   DialogContent,
@@ -164,7 +166,7 @@ export default function InvoiceTemplates() {
       (t.artikelnummer && t.artikelnummer.toLowerCase().includes(s)) ||
       (t.produktnummer && t.produktnummer.toLowerCase().includes(s)) ||
       (t.kurzbezeichnung && t.kurzbezeichnung.toLowerCase().includes(s)) ||
-      (t.langbezeichnung && t.langbezeichnung.toLowerCase().includes(s)) ||
+      (t.langbezeichnung && alsText(t.langbezeichnung).toLowerCase().includes(s)) ||
       (t.lieferant && t.lieferant.toLowerCase().includes(s));
     const matchesKategorie = filterKategorie === "alle" || t.kategorie === filterKategorie;
     const matchesArt = filterArt === "alle"
@@ -214,7 +216,7 @@ export default function InvoiceTemplates() {
       kategorie: t.kategorie, art: t.art || "",
       artikelnummer: t.artikelnummer || "",
       produktnummer: t.produktnummer || "", kurzbezeichnung: t.kurzbezeichnung || t.name,
-      langbezeichnung: t.langbezeichnung || t.beschreibung, netto_preis: t.netto_preis,
+      langbezeichnung: textZuHtml(t.langbezeichnung || t.beschreibung), netto_preis: t.netto_preis,
       brutto_preis: t.brutto_preis, ust_satz: t.ust_satz, ist_lagerartikel: t.ist_lagerartikel,
       lieferant: t.lieferant || "", produktgruppe: t.produktgruppe || t.kategorie,
       foto_path: t.foto_path,
@@ -273,7 +275,7 @@ export default function InvoiceTemplates() {
       artikelnummer: "",
       produktnummer: "",
       kurzbezeichnung: `${t.kurzbezeichnung || t.name} (Kopie)`,
-      langbezeichnung: t.langbezeichnung || t.beschreibung, netto_preis: t.netto_preis,
+      langbezeichnung: textZuHtml(t.langbezeichnung || t.beschreibung), netto_preis: t.netto_preis,
       brutto_preis: t.brutto_preis, ust_satz: t.ust_satz, ist_lagerartikel: t.ist_lagerartikel,
       lieferant: t.lieferant || "", produktgruppe: t.produktgruppe || t.kategorie,
       // Foto nicht mitkopieren — die Datei würde sonst von Original und
@@ -387,7 +389,9 @@ export default function InvoiceTemplates() {
 
     const payload: any = {
       name: form.kurzbezeichnung || form.name,
-      beschreibung: form.langbezeichnung || form.beschreibung || form.kurzbezeichnung || form.name,
+      // beschreibung ist der Klartext-Spiegel: sie wird an vielen Stellen
+      // ungefiltert angezeigt und darf deshalb keine Formatierung tragen.
+      beschreibung: alsText(form.langbezeichnung) || form.beschreibung || form.kurzbezeichnung || form.name,
       einheit: form.ist_set && form.bezugseinheit ? form.bezugseinheit : form.einheit,
       einzelpreis: vkEffective,
       kategorie: form.produktgruppe || form.kategorie,
@@ -396,7 +400,9 @@ export default function InvoiceTemplates() {
       produktnummer: form.produktnummer || null,
       produktgruppe: form.produktgruppe || null,
       kurzbezeichnung: form.kurzbezeichnung || form.name,
-      langbezeichnung: form.langbezeichnung || null,
+      // normalisiere: der Editor hinterlässt beim bloßen Hineinklicken
+      // "<p><br></p>" — das würde im PDF eine leere Zeile reservieren.
+      langbezeichnung: normalisiere(form.langbezeichnung) || null,
       netto_preis: vkEffective,
       brutto_preis: bruttoEffective,
       ust_satz: form.ust_satz,
@@ -678,7 +684,7 @@ export default function InvoiceTemplates() {
                             )}
                           </div>
                         </TableCell>
-                        <TableCell className="text-muted-foreground max-w-[250px] truncate text-xs">{t.langbezeichnung || t.beschreibung}</TableCell>
+                        <TableCell className="text-muted-foreground max-w-[250px] truncate text-xs">{alsText(t.langbezeichnung) || t.beschreibung}</TableCell>
                         <TableCell className="text-xs">{t.einheit}</TableCell>
                         <TableCell className="text-xs">{t.ust_satz}%</TableCell>
                         <TableCell className="text-right font-mono text-sm">{t.netto_preis > 0 ? `€ ${t.netto_preis.toFixed(2)}` : "–"}</TableCell>
@@ -752,12 +758,19 @@ export default function InvoiceTemplates() {
               </div>
               <div>
                 <Label>Langbezeichnung</Label>
-                <Textarea
+                {/* Formatierbar: fett, kursiv, unterstrichen, Farbe und
+                    Aufzählung werden im Angebots-PDF genauso dargestellt.
+                    Alte Klartexte werden beim Öffnen umgewandelt. */}
+                <RichTextEditor
+                  variante="langtext"
                   value={form.langbezeichnung}
-                  onChange={(e) => setForm(f => ({ ...f, langbezeichnung: e.target.value }))}
-                  placeholder="Detaillierte Beschreibung für Angebot/Rechnung (Plain-Text, Zeilenumbrüche erlaubt)"
+                  onChange={(html) => setForm(f => ({ ...f, langbezeichnung: html }))}
+                  placeholder="Detaillierte Beschreibung für Angebot/Rechnung"
                   rows={6}
                 />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Fett, kursiv, unterstrichen und Farbe erscheinen genauso im Angebot und auf der Rechnung.
+                </p>
               </div>
 
               {/* Foto-Upload */}

@@ -6,6 +6,8 @@ import { drawLetterhead, drawFooter, LETTERHEAD_MARGIN } from "./pdfLetterhead";
 import { DEFAULT_MAHNUNG_SETTINGS, renderMahnungText, type MahnungSettings } from "./mahnungSettings";
 import { getDocConfig } from "./documentTypes";
 import { buildAllgemeineAngabenRows } from "./allgemeineAngaben";
+import { langtextZeilen, zeichneLangtext } from "./pdfRichText";
+import { alsText } from "./richText";
 
 const DEFAULT_BANK: BankData = {
   kontoinhaber: "",
@@ -473,7 +475,10 @@ export async function generateInvoicePdf(
   items.forEach((item, idx) => {
     const kurztext = (item as any).kurztext || item.beschreibung;
     const langtext = (item as any).langtext || "";
-    if (langtext && langtext !== kurztext) {
+    // Über den reinen Text vergleichen: ein formatierter Langtext ist als
+    // Zeichenkette nie gleich dem Kurztext ("<p>Fenster</p>" vs "Fenster")
+    // und stünde sonst doppelt im PDF.
+    if (langtext && alsText(langtext) !== alsText(kurztext)) {
       langtextInfo[idx] = { kurztext, langtext };
     }
     // Nur Kurztext in die Zelle. Langtext wird in didDrawCell manuell
@@ -639,8 +644,10 @@ export async function generateInvoicePdf(
           try {
             pdf.setFontSize(KURZ_FONT_SIZE);
             const kurzLines = pdf.splitTextToSize(info.kurztext, descWidth);
-            pdf.setFontSize(LANG_FONT_SIZE);
-            const langLines = pdf.splitTextToSize(info.langtext, descWidth);
+            // Der Langtext kann Formatierung tragen (fett/kursiv/farbig).
+            // Die Zeilen werden hier mit derselben Funktion umbrochen wie
+            // beim Zeichnen — sonst passt die reservierte Höhe nicht.
+            const langLines = langtextZeilen(pdf as never, info.langtext, descWidth, LANG_FONT_SIZE);
             pdf.setFontSize(KURZ_FONT_SIZE);
             const h = CELL_PAD_TOP
               + linesHeightMm(kurzLines.length, KURZ_FONT_SIZE)
@@ -668,16 +675,19 @@ export async function generateInvoicePdf(
             pdf.setFontSize(KURZ_FONT_SIZE);
             const kurzLines = pdf.splitTextToSize(info.kurztext, cellW);
             const kurzH = linesHeightMm(kurzLines.length, KURZ_FONT_SIZE);
-            pdf.setFont("helvetica", "italic");
-            pdf.setFontSize(LANG_FONT_SIZE);
-            pdf.setTextColor(120, 120, 120);
-            const langLines = pdf.splitTextToSize(info.langtext, cellW);
+            const langLines = langtextZeilen(pdf as never, info.langtext, cellW, LANG_FONT_SIZE);
             const langBaselineY = data.cell.y + CELL_PAD_TOP + kurzH + LANG_GAP + ptToMm(LANG_FONT_SIZE);
-            pdf.text(langLines, cellX, langBaselineY);
-            // Reset
-            pdf.setFont("helvetica", "normal");
+            // Zeichnet jeden Abschnitt in seiner Schrift und Farbe; ohne
+            // Formatierung sieht das Ergebnis aus wie bisher (grau, kursiv).
+            zeichneLangtext(
+              pdf as never,
+              langLines,
+              cellX,
+              langBaselineY,
+              LANG_FONT_SIZE,
+              ptToMm(LANG_FONT_SIZE) * LINE_HEIGHT_FACTOR,
+            );
             pdf.setFontSize(KURZ_FONT_SIZE);
-            pdf.setTextColor(0, 0, 0);
           } catch { /* ignore */ }
         }
       }

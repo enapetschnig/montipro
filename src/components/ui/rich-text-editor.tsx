@@ -6,29 +6,52 @@ import { useMemo } from "react";
 import ReactQuill from "react-quill-new";
 import "react-quill-new/dist/quill.snow.css";
 
+/** Farben für Hervorhebungen — bewusst wenige, dafür gut lesbar im Druck. */
+const TEXTFARBEN = [
+  "#000000", "#e60000", "#008a00", "#0645ad", "#c78100", "#666666",
+];
+
 interface Props {
   value: string;
   onChange: (html: string) => void;
   placeholder?: string;
   rows?: number;
   className?: string;
+  /**
+   * "email" (Standard) — volle Leiste mit Überschriften und Links.
+   * "langtext" — nur was im PDF darstellbar ist: fett, kursiv,
+   * unterstrichen, Farbe, Aufzählung. Überschriften und Links fehlen
+   * bewusst, weil das PDF sie nicht abbilden kann.
+   */
+  variante?: "email" | "langtext";
 }
 
-export function RichTextEditor({ value, onChange, placeholder, rows = 8, className }: Props) {
-  const modules = useMemo(() => ({
-    toolbar: [
-      [{ header: [1, 2, 3, false] }],
-      ["bold", "italic", "underline"],
-      [{ list: "ordered" }, { list: "bullet" }],
-      ["link"],
-      ["clean"],
-    ],
-  }), []);
+export function RichTextEditor({ value, onChange, placeholder, rows = 8, className, variante = "email" }: Props) {
+  const modules = useMemo(() => (
+    variante === "langtext"
+      ? {
+          toolbar: [
+            ["bold", "italic", "underline"],
+            [{ color: TEXTFARBEN }],
+            [{ list: "bullet" }],
+            ["clean"],
+          ],
+        }
+      : {
+          toolbar: [
+            [{ header: [1, 2, 3, false] }],
+            ["bold", "italic", "underline"],
+            [{ color: TEXTFARBEN }],
+            [{ list: "ordered" }, { list: "bullet" }],
+            ["link"],
+            ["clean"],
+          ],
+        }
+  ), [variante]);
 
-  const formats = [
-    "header", "bold", "italic", "underline",
-    "list", "bullet", "link",
-  ];
+  const formats = variante === "langtext"
+    ? ["bold", "italic", "underline", "color", "list", "bullet"]
+    : ["header", "bold", "italic", "underline", "color", "list", "bullet", "link"];
 
   // Mindesthöhe an „rows" anlehnen, damit das Feld optisch zur
   // Textarea-Variante passt (rows*22px Body + 42px Toolbar).
