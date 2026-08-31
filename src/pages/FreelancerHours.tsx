@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { AenderungswunschKnopf } from "@/components/aenderungswunsch/AenderungswunschKnopf";
 import { useToast } from "@/hooks/use-toast";
 import { format, parseISO } from "date-fns";
 import { de } from "date-fns/locale";
@@ -133,13 +134,14 @@ export default function FreelancerHours() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b bg-card sticky top-0 z-10">
+      <header data-seitenkopf className="border-b bg-card sticky top-0 z-10">
         <div className="container mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h1 className="text-lg font-semibold">Zeiterfassung</h1>
             <Badge variant="outline">Freier Mitarbeiter</Badge>
           </div>
           <div className="flex items-center gap-3">
+            <AenderungswunschKnopf gestalt="kopf" />
             <span className="text-sm text-muted-foreground hidden sm:inline">{userName}</span>
             <Button variant="ghost" size="sm" onClick={logout} className="gap-2">
               <LogOut className="w-4 h-4" /> Abmelden

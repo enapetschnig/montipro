@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { MessageSquarePlus } from "lucide-react";
@@ -30,19 +30,17 @@ export function AenderungswunschKnopf({
   /** Nur für die schwebende Form: Gibt es hier schon eine Kopfzeile? */
   const [kopfDa, setKopfDa] = useState(false);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (gestalt !== "schwebend") return;
-    // Die Kopfzeile erscheint auf manchen Seiten erst NACH dem Laden der
-    // Daten — deshalb eine Weile lang immer wieder nachsehen, statt einmal
-    // zu früh zu urteilen.
-    setKopfDa(!!document.querySelector("[data-seitenkopf]"));
-    let versuche = 0;
-    const uhr = setInterval(() => {
-      const da = !!document.querySelector("[data-seitenkopf]");
-      setKopfDa(da);
-      if (da || ++versuche > 12) clearInterval(uhr);   // längstens ~4 s
-    }, 300);
-    return () => clearInterval(uhr);
+    // Die Kopfzeile erscheint auf vielen Seiten erst NACH dem Laden der Daten.
+    // Deshalb wird der Seiteninhalt beobachtet statt eine Zeit lang gepollt:
+    // Eine feste Frist verpasst langsame Verbindungen (dann stünden beide
+    // Knöpfe da) und urteilt bei schnellen zu früh (kurzes Aufblitzen).
+    const nachsehen = () => setKopfDa(!!document.querySelector("[data-seitenkopf]"));
+    nachsehen();
+    const beobachter = new MutationObserver(nachsehen);
+    beobachter.observe(document.body, { childList: true, subtree: true });
+    return () => beobachter.disconnect();
   }, [gestalt, ort.pathname]);
 
   const starten = async () => {
@@ -63,7 +61,7 @@ export function AenderungswunschKnopf({
     <>
       <Button
         type="button"
-        variant={gestalt === "kopf" ? "outline" : "outline"}
+        variant="outline"
         size={gestalt === "kopf" ? "sm" : "icon"}
         onClick={() => void starten()}
         disabled={arbeitet}

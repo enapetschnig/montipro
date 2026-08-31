@@ -63,12 +63,12 @@ export function NeuerungenBanner({ userId }: { userId: string }) {
   if (offen.length === 0) return null;
 
   return (
-    <div className="mb-4 rounded-lg border border-kb-green/40 bg-[#F0F7EC] p-3 shadow-sm sm:mb-6" data-bildschirmfoto="aus">
+    <div className="mb-4 rounded-lg border border-emerald-500/40 bg-[#F0F7EC] p-3 shadow-sm sm:mb-6" data-bildschirmfoto="aus">
       <div className="flex items-start gap-2">
-        <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-kb-green" />
+        <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-bold text-kb-blue-dark">
+            <span className="text-sm font-bold text-primary">
               Das ist neu {offen.length > 1 ? `(${offen.length} Änderungen)` : ""}
             </span>
             <span className="flex items-center gap-1 rounded-full bg-white/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">

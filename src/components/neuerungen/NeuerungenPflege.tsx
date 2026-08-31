@@ -59,14 +59,15 @@ export function NeuerungenPflege() {
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base">
-          <Megaphone className="h-5 w-5 text-kb-blue-dark" />
+          <Megaphone className="h-5 w-5 text-primary" />
           Neuerungen melden
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">
-          Erscheint allen Benutzern <b>einmal</b> oben auf der Startseite — mit dem Hinweis,
-          die App neu zu laden. Nach dem Bestätigen ist die Meldung weg.
+          Erscheint <b>einmal</b> oben auf der Startseite — mit dem Hinweis, die App neu zu
+          laden. Nach dem Bestätigen ist die Meldung weg. Derzeit sehen das nur
+          Administratoren.
         </p>
         <div className="space-y-2">
           <div className="space-y-1">

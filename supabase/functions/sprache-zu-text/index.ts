@@ -24,20 +24,26 @@ const corsHeaders = {
 };
 
 /**
- * Der Wortschatz der Schlosserei. Ohne diesen Hinweis macht die Abschrift aus
- * "Feuerverzinken" gern "Feuer verzinken" und aus "Lieferschein" "Liefer
- * Schein" — und aus einem brauchbaren Hinweis wird Kauderwelsch.
+ * Der Wortschatz des Betriebs. Ohne diesen Hinweis macht die Abschrift aus
+ * "Bautagesbericht" gern "Bau Tages Bericht" und aus "Ersttermin" "erster
+ * Termin" — und aus einem brauchbaren Hinweis wird Kauderwelsch.
+ *
+ * Angepasst an BKS BauKomplettService: Montage, Innenausbau, Böden, Türen.
+ * Eine geerbte Liste aus einem anderen Gewerk schadet aktiv, weil sie die
+ * Erkennung in dessen Fachsprache zieht.
  */
 const FACHWOERTER = [
-  "Feuerverzinken", "Verzinkerei", "Pulverbeschichtung", "Flachstahl",
-  "Formrohr", "Rundrohr", "Vierkantrohr", "Blech", "Kantteil", "Abkantung",
-  "Schweißnaht", "Heftnaht", "Ausschweißen", "Verschleifen", "Spritzerputzen",
-  "Zuschnitt", "Stückliste", "Gitterrost", "Geländer", "Handlauf", "Stiege",
-  "Vordach", "Überdachung", "Stützenfuß", "Winkelrahmen", "Schiebetor",
-  "Garagentor", "Attika", "Träger", "IPE", "HEA", "HEB", "UNP",
-  "Lieferschein", "Angebot", "Eingangsrechnung", "Eingangsangebot",
-  "Kundenordner", "Arbeitszeit", "Maschinenstunden", "Hänger-Kilometer",
-  "Katalog-Abgleich", "Frankstahl", "Schachermayer", "CS Powermetall",
+  "Bautagesbericht", "Regiebericht", "Besprechungsprotokoll", "Ersttermin",
+  "Baustelle", "Bauleitung", "Baustellenzufahrt", "Aufmaß", "Naturmaß",
+  "Küchenmontage", "Möbelmontage", "Innentüren", "Zargen", "Türblatt",
+  "Bodenverlegung", "Laminat", "Vinylboden", "Parkett", "Sockelleiste",
+  "Trockenbau", "Rigips", "Gipskarton", "Ständerwerk", "Dämmung",
+  "Silikonfuge", "Abdichtung", "Untergrund", "Ausgleichsmasse",
+  "Fensterbank", "Fensterfirma", "Beschlag", "Scharnier", "Dübel",
+  "Zeiterfassung", "Zeitausgleich", "Stundenaufzeichnung", "Plantafel",
+  "Angebot", "Anzahlungsrechnung", "Schlussrechnung", "Eingangsrechnung",
+  "Lieferantengutschrift", "Materialliste", "Arbeitsleistung",
+  "BKS BauKomplettService",
 ].join(", ");
 
 function mimeToExt(mime: string): string {
@@ -66,7 +72,7 @@ async function abschreiben(datei: Blob, mime: string): Promise<string> {
   form.append("language", "de");
   form.append(
     "prompt",
-    `Sprachnotiz aus einem österreichischen Schlossereibetrieb (CS Powermetall). `
+    `Sprachnotiz aus einem österreichischen Bau- und Montagebetrieb (BKS BauKomplettService). `
     + `Es geht um einen Änderungswunsch an einer Handwerker-App. `
     + `Gesprochen wird Hochdeutsch mit österreichischem Einschlag — bitte in `
     + `sauberem Hochdeutsch abschreiben, Füllwörter weglassen, Sätze so lassen, `
@@ -84,6 +90,36 @@ async function abschreiben(datei: Blob, mime: string): Promise<string> {
   }
   const json = await res.json();
   return String(json.text ?? "").trim();
+}
+
+/**
+ * Wer ruft hier an? Die Funktion arbeitet mit dem Service-Schlüssel und
+ * umgeht damit alle Zugriffsregeln — deshalb muss sie selbst prüfen, wem
+ * Aufnahme und Wunsch gehören. Ohne das könnte jeder Angemeldete fremde
+ * Sprachnachrichten abrufen und fremde Meldungen überschreiben.
+ */
+async function anruferId(req: Request): Promise<string> {
+  const token = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
+  if (!token) throw new Error("Nicht angemeldet.");
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Nicht angemeldet.");
+  const nutzer = await res.json();
+  const id = typeof nutzer?.id === "string" ? nutzer.id : "";
+  if (!id) throw new Error("Nicht angemeldet.");
+  return id;
+}
+
+/** Gehört dieser Wunsch dem Anrufer? */
+async function gehoertWunsch(wunschId: string, nutzerId: string): Promise<boolean> {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/aenderungswuensche?id=eq.${encodeURIComponent(wunschId)}&select=erstellt_von`,
+    { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } },
+  );
+  if (!res.ok) return false;
+  const zeilen = await res.json().catch(() => []);
+  return zeilen?.[0]?.erstellt_von === nutzerId;
 }
 
 /** Kleiner REST-Helfer — kein SDK nötig für zwei Aufrufe. */
@@ -106,16 +142,29 @@ Deno.serve(async (req) => {
   let wunschId: string | undefined;
   try {
     if (!OPENAI_API_KEY) throw new Error("Die Spracherkennung ist nicht eingerichtet.");
-    if (!req.headers.get("Authorization")) throw new Error("Nicht angemeldet.");
+    const nutzerId = await anruferId(req);
 
     const body = await req.json();
     wunschId = typeof body?.wunschId === "string" ? body.wunschId : undefined;
+
+    // Der Wunsch muss dem Anrufer gehören — sonst könnte man über eine
+    // fremde ID den Text einer fremden Meldung überschreiben.
+    if (wunschId && !(await gehoertWunsch(wunschId, nutzerId))) {
+      wunschId = undefined;
+      throw new Error("Diese Meldung gehört nicht zu deinem Konto.");
+    }
 
     let datei: Blob;
     let mime: string;
 
     if (wunschId && typeof body?.audioPfad === "string") {
       // Weg 1: Die Aufnahme liegt schon im Ablagebereich.
+      // Der Pfad muss im eigenen Ordner liegen und darf nichts Konstruiertes
+      // enthalten — die Funktion liest sonst mit dem Service-Schlüssel jede
+      // beliebige Datei und gäbe die Abschrift zurück.
+      if (!new RegExp(`^${nutzerId}/[\\w.-]+$`).test(body.audioPfad)) {
+        throw new Error("Ungültiger Pfad zur Aufnahme.");
+      }
       await wunschSetzen(wunschId, { abschrift: "laeuft", abschrift_fehler: null });
       const res = await fetch(
         `${SUPABASE_URL}/storage/v1/object/aenderungswuensche/${body.audioPfad}`,

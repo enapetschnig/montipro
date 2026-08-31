@@ -70,6 +70,15 @@ export function AenderungswunschDialog({ open, onOpenChange, bild, seite }: Prop
   const [nimmtAuf, setNimmtAuf] = useState(false);
   const [sekunden, setSekunden] = useState(0);
   const [aufnahmeBlob, setAufnahmeBlob] = useState<Blob | null>(null);
+  // Eine Objekt-URL je Aufnahme, sauber wieder freigegeben. Inline im Render
+  // erzeugt, entstünde bei jedem Tastendruck eine neue, die nie zurückgegeben wird.
+  const [aufnahmeUrl, setAufnahmeUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!aufnahmeBlob) { setAufnahmeUrl(null); return; }
+    const url = URL.createObjectURL(aufnahmeBlob);
+    setAufnahmeUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [aufnahmeBlob]);
   const rec = useRef<MediaRecorder | null>(null);
   const stuecke = useRef<Blob[]>([]);
   const uhr = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -257,7 +266,7 @@ export function AenderungswunschDialog({ open, onOpenChange, bild, seite }: Prop
             <div className="rounded-md border border-dashed p-3 space-y-2">
               {aufnahmeBlob ? (
                 <div className="flex flex-wrap items-center gap-2">
-                  <audio controls src={URL.createObjectURL(aufnahmeBlob)} className="h-9 flex-1 min-w-40" />
+                  <audio controls src={aufnahmeUrl ?? undefined} className="h-9 flex-1 min-w-40" />
                   <Button
                     type="button" variant="ghost" size="sm" className="gap-1.5 text-muted-foreground"
                     onClick={() => { setAufnahmeBlob(null); setSekunden(0); }}
