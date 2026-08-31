@@ -14,6 +14,115 @@ export type Database = {
   }
   public: {
     Tables: {
+      aenderungswuensche: {
+        Row: {
+          abschrift: string
+          abschrift_fehler: string | null
+          antwort: string | null
+          art: string
+          audio_pfad: string | null
+          bild_pfad: string | null
+          created_at: string
+          erstellt_von: string | null
+          id: string
+          melder_gesehen_am: string | null
+          seite: string | null
+          status: string
+          text: string
+          updated_at: string
+        }
+        Insert: {
+          abschrift?: string
+          abschrift_fehler?: string | null
+          antwort?: string | null
+          art?: string
+          audio_pfad?: string | null
+          bild_pfad?: string | null
+          created_at?: string
+          erstellt_von?: string | null
+          id?: string
+          melder_gesehen_am?: string | null
+          seite?: string | null
+          status?: string
+          text?: string
+          updated_at?: string
+        }
+        Update: {
+          abschrift?: string
+          abschrift_fehler?: string | null
+          antwort?: string | null
+          art?: string
+          audio_pfad?: string | null
+          bild_pfad?: string | null
+          created_at?: string
+          erstellt_von?: string | null
+          id?: string
+          melder_gesehen_am?: string | null
+          seite?: string | null
+          status?: string
+          text?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      neuerungen: {
+        Row: {
+          aenderungswunsch_id: string | null
+          created_at: string
+          id: string
+          text: string | null
+          titel: string
+        }
+        Insert: {
+          aenderungswunsch_id?: string | null
+          created_at?: string
+          id?: string
+          text?: string | null
+          titel: string
+        }
+        Update: {
+          aenderungswunsch_id?: string | null
+          created_at?: string
+          id?: string
+          text?: string | null
+          titel?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "neuerungen_aenderungswunsch_id_fkey"
+            columns: ["aenderungswunsch_id"]
+            isOneToOne: false
+            referencedRelation: "aenderungswuensche"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      neuerungen_gelesen: {
+        Row: {
+          gelesen_am: string
+          neuerung_id: string
+          user_id: string
+        }
+        Insert: {
+          gelesen_am?: string
+          neuerung_id: string
+          user_id: string
+        }
+        Update: {
+          gelesen_am?: string
+          neuerung_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "neuerungen_gelesen_neuerung_id_fkey"
+            columns: ["neuerung_id"]
+            isOneToOne: false
+            referencedRelation: "neuerungen"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       admin_config_options: {
         Row: {
           created_at: string | null

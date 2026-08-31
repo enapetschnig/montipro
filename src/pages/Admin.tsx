@@ -33,6 +33,8 @@ import { MahnungSettings } from "@/components/admin/MahnungSettings";
 import { CustomerColorSettings } from "@/components/admin/CustomerColorSettings";
 import { NumberRangeSettings } from "@/components/admin/NumberRangeSettings";
 import { ConfigOptionsManager } from "@/components/admin/ConfigOptionsManager";
+import { AenderungswuenscheListe } from "@/components/aenderungswunsch/AenderungswuenscheListe";
+import { NeuerungenPflege } from "@/components/neuerungen/NeuerungenPflege";
 import { VehicleManager } from "@/components/admin/VehicleManager";
 import { EmailSettings } from "@/components/admin/EmailSettings";
 import { PlantafelDefaultColors } from "@/components/admin/PlantafelDefaultColors";
@@ -711,6 +713,7 @@ export default function Admin() {
             <TabsTrigger value="whatsapp" className="flex-shrink-0">WhatsApp</TabsTrigger>
             <TabsTrigger value="email" className="flex-shrink-0">Email-Versand</TabsTrigger>
             <TabsTrigger value="kalender" className="flex-shrink-0">Google Kalender</TabsTrigger>
+            <TabsTrigger value="wuensche" className="flex-shrink-0">Änderungswünsche</TabsTrigger>
           </TabsList>
 
           {/* ===== TAB 1: BENUTZER & MITARBEITER ===== */}
@@ -1303,6 +1306,12 @@ export default function Admin() {
           {/* ===== TAB 9: GOOGLE KALENDER ===== */}
           <TabsContent value="kalender" className="space-y-6">
             <GoogleCalendarSettings />
+          </TabsContent>
+
+          {/* ===== TAB 10: ÄNDERUNGSWÜNSCHE ===== */}
+          <TabsContent value="wuensche" className="space-y-6">
+            <NeuerungenPflege />
+            <AenderungswuenscheListe />
           </TabsContent>
         </Tabs>
       </main>

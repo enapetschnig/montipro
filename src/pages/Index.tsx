@@ -17,6 +17,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import ChangePasswordDialog from "@/components/ChangePasswordDialog";
 import { usePermissions } from "@/hooks/usePermissions";
+import { AenderungswunschKnopf } from "@/components/aenderungswunsch/AenderungswunschKnopf";
+import { ErledigteWuensche } from "@/components/aenderungswunsch/ErledigteWuensche";
+import { NeuerungenBanner } from "@/components/neuerungen/NeuerungenBanner";
 import { MeineEinteilung } from "@/components/MeineEinteilung";
 
 type Project = {
@@ -265,8 +268,9 @@ export default function Index() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-card sticky top-0 z-50 shadow-sm">
+      {/* Header — data-seitenkopf: hier sitzt der Melde-Knopf schon in der
+          Leiste, der schwebende im AppLayout blendet sich dadurch aus. */}
+      <header data-seitenkopf className="border-b bg-card sticky top-0 z-50 shadow-sm">
         <div className="container mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-4">
           <div className="flex justify-between items-center gap-3">
             <div className="flex items-center gap-2 sm:gap-3">
@@ -275,9 +279,11 @@ export default function Index() {
                 <span className="text-sm sm:text-base font-semibold">{userName || "Benutzer"}</span>
               </div>
             </div>
+            <div className="flex items-center gap-2">
+            <AenderungswunschKnopf gestalt="kopf" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" data-bildschirmfoto="aus">
                   <UserIcon className="h-4 w-4 mr-2" />
                   <span className="hidden sm:inline">Menü</span>
                 </Button>
@@ -303,6 +309,7 @@ export default function Index() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            </div>
           </div>
         </div>
       </header>
@@ -344,6 +351,12 @@ export default function Index() {
               : "Zeiterfassung und Projektdokumentation"}
           </p>
         </div>
+
+        {/* Rückmeldung auf eigene Meldungen — für alle Angemeldeten */}
+        <ErledigteWuensche />
+
+        {/* „Das ist neu" — bewusst nur für Administratoren (Kundenentscheid) */}
+        {user && isAdmin && <NeuerungenBanner userId={user.id} />}
 
         {/* Meine Einteilung — für Mitarbeiter und Vorarbeiter */}
         {user && !isAdmin && <MeineEinteilung userId={user.id} />}

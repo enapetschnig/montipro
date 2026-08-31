@@ -41,3 +41,5 @@ verify_jwt = false
 
 [functions.parse-invoice-document]
 verify_jwt = false
+[functions.wunsch-datei]
+verify_jwt = false
