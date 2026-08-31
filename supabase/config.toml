@@ -1,4 +1,8 @@
-project_id = "vcrkhmvhrszwbfpgdhhs"
+# Das echte Projekt „Monti.pro". Hier stand bis 31.08.2026 ein Überbleibsel
+# aus der Fork-Zeit (vcrkhmvhrszwbfpgdhhs); gut ging das nur, weil die lokale
+# Datei supabase/.temp/linked-project.json die Angabe übersteuerte. Ohne die
+# hätten Datenbankbefehle auf ein fremdes Projekt gezielt.
+project_id = "zbxizeirecoipqvxymdx"
 
 [functions.send-disturbance-report]
 verify_jwt = false

@@ -11,37 +11,28 @@ Der Ordner heißt `monti.pro` (Domain), die Firma heißt **BKS BauKomplettServic
 
 ---
 
-## ⚠️ Wichtig: Supabase-Projekt
+## Supabase-Projekt
 
-Das Repo enthält zwei widersprüchliche Angaben:
+Projekt-ID: **`zbxizeirecoipqvxymdx`** („Monti.pro", Organisation
+`epadfagtwxodsshrktno`), URL `https://zbxizeirecoipqvxymdx.supabase.co`.
+Alle drei Quellen stimmen überein: `.env` → `VITE_SUPABASE_URL`,
+`supabase/config.toml` → `project_id` und die von der CLI selbst hinterlegte
+Verknüpfung in `supabase/.temp/linked-project.json`.
 
-| Quelle | Projekt-ID | Gültig? |
-|---|---|---|
-| `.env` → `VITE_SUPABASE_URL` | `zbxizeirecoipqvxymdx` | ✅ **Das ist das echte Projekt** |
-| `supabase/config.toml` → `project_id` | `vcrkhmvhrszwbfpgdhhs` | ❌ veraltet |
+**Historie (bis 31.08.2026):** In der `config.toml` stand ein Überbleibsel aus
+der Fork-Zeit — `vcrkhmvhrszwbfpgdhhs`. Gut ging das nur, weil die Verknüpfung
+in `.temp/` die `config.toml` übersteuert; ohne sie hätten `supabase link`,
+`db push` und `functions deploy` auf ein fremdes Projekt gezielt. Die Angabe
+ist korrigiert, `.temp/` ist damit nicht mehr die einzige Absicherung.
 
-URL: `https://zbxizeirecoipqvxymdx.supabase.co`
+Dieselbe Abweichung liegt (Stand 31.08.2026) noch bei **willroider** vor.
 
-**Beleg** — die Supabase-CLI hat ihre Verknüpfung selbst hinterlegt, in
-`supabase/.temp/linked-project.json` (Stand 14.04.2026):
-
-```json
-{"ref":"zbxizeirecoipqvxymdx","name":"Monti.pro","organization_id":"epadfagtwxodsshrktno"}
-```
-
-Dazu passend `supabase/.temp/project-ref` und die `pooler-url`
-(`postgres.zbxizeirecoipqvxymdx@aws-1-eu-central-1.pooler.supabase.com`).
-
-Die `config.toml` ist ein Überbleifsel aus der Fork-Zeit und wurde nie
-nachgezogen. Sie steuert, worauf die CLI zeigt (`supabase link`,
-`supabase db push`, `supabase functions deploy`).
-
-**Praktische Folge:** Solange `.temp/linked-project.json` existiert, arbeitet
-die CLI auf dem richtigen Projekt — die Verknüpfung sticht die `config.toml`.
-Wird `.temp/` gelöscht oder auf einem anderen Rechner gearbeitet, greift wieder
-die falsche ID aus der `config.toml`.
-
-Dieselbe Abweichung liegt bei willroider vor (dort ebenfalls `.env` korrekt).
+**Wichtig für die tägliche Arbeit:** Es gibt zwei getrennte Supabase-Konten.
+Monti.pro liegt in der Organisation `epadfagtwxodsshrktno`; ein Token aus dem
+Konto `napetschnig.chris@gmail.com` sieht das Projekt NICHT. Erkennungszeichen:
+`403 … does not have the necessary privileges` heißt „falsches Konto", ein
+`401 Unauthorized` heißt „Token abgelaufen". Schnelltest:
+`supabase projects list` muss „Monti.pro" enthalten.
 
 ---
 
