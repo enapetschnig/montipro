@@ -1,3 +1,4 @@
+import { ohneSkripte } from "@/lib/druckfenster";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -481,7 +482,7 @@ export default function Invoices() {
         const html = decodeURIComponent(escape(atob(data.pdf)));
         const win = window.open("", "_blank");
         if (win) {
-          win.document.write(html);
+          win.document.write(ohneSkripte(html));
           win.document.close();
           win.document.title = `${inv.nummer} - ${inv.kunde_name}`;
         }
