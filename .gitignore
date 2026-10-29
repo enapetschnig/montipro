@@ -25,4 +25,5 @@ dist-ssr
 *.sw?
 vorlagefunktionenapp
 test-results/
-.claude/
+.claude/*
+!.claude/rules/
