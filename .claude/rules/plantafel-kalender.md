@@ -27,3 +27,4 @@ paths:
   Dubletten testen.
 - Wechselt der Geschäftsbereich eines Projekts, muss der Termin im Google-Kalender mitwandern (April 2026, Projekt
   „Portas/Hobinger Pottendorf“).
+- **Plantafel-Rechte kommen aus `user_roles`** (07.11.2026): `useSchedulePermissions` las `employees.kategorie`, die Spalte gab es nie – die Abfrage scheiterte still (Fehlerprotokoll: „column employees.kategorie does not exist“) und Vorarbeiter flogen trotz Recht aufs Dashboard. Zum Stand 07.11. hat niemand live die Rolle Vorarbeiter. Test: `tests/roboter/2026-11-07-plantafel-rechte.spec.ts`.

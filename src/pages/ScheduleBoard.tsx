@@ -68,7 +68,6 @@ export default function ScheduleBoard() {
     userId,
     isAdmin,
     isVorarbeiter,
-    isExtern,
     canManageHolidays,
     loading: permLoading,
   } = useSchedulePermissions();
@@ -106,10 +105,10 @@ export default function ScheduleBoard() {
   const [prefillFirmaEnd, setPrefillFirmaEnd] = useState<string | undefined>();
 
   useEffect(() => {
-    if (!permLoading && !isAdmin && !isVorarbeiter && !isExtern) {
+    if (!permLoading && !isAdmin && !isVorarbeiter) {
       navigate("/");
     }
-  }, [permLoading, isAdmin, isVorarbeiter, isExtern, navigate]);
+  }, [permLoading, isAdmin, isVorarbeiter, navigate]);
 
   useEffect(() => {
     if (!permLoading) {

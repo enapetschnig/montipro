@@ -6,7 +6,6 @@ export function useSchedulePermissions() {
   const [userId, setUserId] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [isVorarbeiter, setIsVorarbeiter] = useState(false);
-  const [isExtern, setIsExtern] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -20,22 +19,15 @@ export function useSchedulePermissions() {
       }
       setUserId(user.id);
 
-      const [{ data: roleData }, { data: empData }] = await Promise.all([
-        supabase
-          .from("user_roles")
-          .select("role")
-          .eq("user_id", user.id)
-          .maybeSingle(),
-        supabase
-          .from("employees")
-          .select("kategorie")
-          .eq("user_id", user.id)
-          .maybeSingle(),
-      ]);
+      // Die Rolle steht in user_roles – dieselbe Quelle wie ProtectedRoute und RLS.
+      const { data: roleData } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.id)
+        .maybeSingle();
 
       setIsAdmin(roleData?.role === "administrator");
-      setIsVorarbeiter(empData?.kategorie === "vorarbeiter");
-      setIsExtern(empData?.kategorie === "extern");
+      setIsVorarbeiter(roleData?.role === "vorarbeiter");
       setLoading(false);
     };
     check();
@@ -59,7 +51,6 @@ export function useSchedulePermissions() {
     userId,
     isAdmin,
     isVorarbeiter,
-    isExtern,
     canEditProject,
     canManageHolidays,
     loading,
