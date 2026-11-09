@@ -19,7 +19,7 @@ Kopie dieser Datei (für Codex) – bei Änderungen beide gleich halten. Es gibt
 
 ## Rollen
 Administrator, Vorarbeiter, Mitarbeiter (`app_role`), dazu freie Mitarbeiter mit einfachem Stundenformular (`/freelancer`).
-Jeder Mitarbeiter sieht alle Projekte. Neue Benutzer warten auf Freischaltung durch den Admin.
+Mitarbeiter sehen nur die ihnen zugewiesenen Projekte (Admin/Vorarbeiter alle, seit 21.04.2026). Neue Benutzer warten auf Freischaltung durch den Admin.
 
 ## Fachbegriffe
 Ersttermin (Erstaufnahme beim Kunden), Besprechungsprotokoll, Bautagesbericht, Regiebericht (`Disturbances`), Plantafel,
@@ -54,6 +54,7 @@ Lieferantengutschrift (LG), Zeitausgleich (ZA), Zeitkonto, Fremdfirma/Subfirma, 
 | WhatsApp-Bot | `.claude/rules/whatsapp.md` | alles mit Whapi, Erinnerungen, Kanal-Überwachung |
 | Plantafel und Google-Kalender | `.claude/rules/plantafel-kalender.md` | Plantafel, Kalender-Sync, Farben, Fremdfirmen |
 | Kunden, Ersttermine, Projekte, Mitarbeiter | `.claude/rules/kunden-ersttermine.md` | Kundenformular, Ersttermin, Projektliste, Mitarbeiter-Archiv |
+| Grundtests und Datenbank-Sicherheit | `.claude/rules/grundtests-sicherheit.md` | Tests unter tests/roboter, RLS-Regeln, Testumgebung |
 
 ---
 
