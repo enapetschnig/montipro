@@ -30,3 +30,6 @@ paths:
 - Ausscheiden statt Löschen (Mitarbeiter-Archiv mit Reaktivierung, 06.07.); gelöschte/ausgeschiedene Mitarbeiter dürfen
   nicht in Auswahllisten auftauchen (Beispiel Jarko Ribarski). Daten ausgeschiedener unter `exports/geloeschte_mitarbeiter`.
 - Dashboard-Banner „Benutzer wartet auf Freischaltung“ führt direkt zur Freischaltung (25.06.).
+
+## Kontakthistorie (11.11.2026)
+- `profiles` hat **keine Spalte `role`** – Rolle immer aus `user_roles` (Werte `administrator`/`vorarbeiter`/`mitarbeiter`, nicht „admin“). `ContactHistoryTimeline` las `profiles.role` → 4× „column profiles.role does not exist“ im Log und Admin sah bei fremden Einträgen kein „Löschen“; behoben, Probefahrt `tests/roboter/2026-11-11-kontakthistorie-rolle.spec.ts`.
