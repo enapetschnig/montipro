@@ -24,3 +24,4 @@ paths:
   nicht an montage@monti.pro und nicht über Whapi (26.06.).
 - Nach Re-Auth prüfen: Morgen-Erinnerung mit `force` auslösen, `sentCount` kontrollieren (26.06.: 2 = Judith, Günter).
 - 520 bei `whatsapp-daily-reminder` (1×, 05.11.2026 22:15 UTC) ist harmlos: Aufruf aus einem **fremden** Supabase-Projekt (pg_net 0.20.3, Monti hat 0.20.0), blieb nach 40 s bei Cloudflare/Supabase hängen, ohne `function_id`, erreichte die Funktion also nicht; Montis eigener Lauf gab 200. Die rund 480 × 401 pro Tag kommen ebenso von Schwester-Apps, deren aus Monti kopierte Migrationen die Monti-URL fest im Cron haben (Abgewiesen, keine Sendung).
+- 503 bei `whatsapp-daily-reminder` (1×, 13.11.2026 13:15 UTC): gleiches Muster wie der 520 – fremdes Projekt (pg_net 0.20.3, ungültiger Schlüssel, ohne `function_id`), Montis eigener Lauf zur selben Zeit gab 200. Harmlos, nichts ändern.
