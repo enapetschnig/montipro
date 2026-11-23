@@ -1135,6 +1135,12 @@ export default function InvoiceDetail() {
     if (validItems.length === 0) {
       return abbruch("Fehler", "Mindestens eine Position mit Beschreibung ist erforderlich");
     }
+    // INTEGRITÄT (wie hw-core; Fall Tilger 23.11.2026): Zeilen ohne Beschreibung werden beim Speichern verworfen –
+    // hätte so eine Zeile einen Betrag, stünde in der Liste eine andere Summe als in den Positionen.
+    const phantomIdx = items.findIndex(item => !item.beschreibung.trim() && Math.abs(Number(item.gesamtpreis) || 0) > 0.005);
+    if (phantomIdx >= 0) {
+      return abbruch("Position ohne Beschreibung", `Position ${phantomIdx + 1} hat einen Betrag, aber keine Beschreibung — bitte Beschreibung ergänzen oder Zeile löschen.`);
+    }
 
     // Rechnungsbetrag muss > 0 sein (außer bei Entwürfen). bruttoSumme statt
     // eigener Rechnung: die lokale Variante ignorierte mwst_exempt-Zeilen
