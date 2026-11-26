@@ -33,3 +33,4 @@ paths:
 
 ## Kontakthistorie (11.11.2026)
 - `profiles` hat **keine Spalte `role`** – Rolle immer aus `user_roles` (Werte `administrator`/`vorarbeiter`/`mitarbeiter`, nicht „admin“). `ContactHistoryTimeline` las `profiles.role` → 4× „column profiles.role does not exist“ im Log und Admin sah bei fremden Einträgen kein „Löschen“; behoben, Probefahrt `tests/roboter/2026-11-11-kontakthistorie-rolle.spec.ts`.
+- Nachzügler 25.11.2026 06:15 UTC (1× „profiles.role“, `select=role&id=eq.…`, Referer monti.handwerkapp.at): ein Browser mit noch zwischengespeicherter App-Fassung vor dem Fix; Live-Bundle enthält die Abfrage nachweislich nicht mehr → harmlos, verschwindet nach Neuladen. „TREFFER:“ (2×, 25.11., `P0001`, `application_name = mgmt-api`) = absichtliches `raise exception` aus KI-Suchskripten über die Management-API, kein App-Fehler. (26.11.2026)
